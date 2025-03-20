@@ -45,6 +45,14 @@ public interface ICryptor {
     byte[] encrypt(byte[] data) throws GeneralSecurityException;
 
     /**
+     * Encrypts data using {@link #getKey()} symmetric key to the same passed data buffer.
+     *
+     * @param data The data buffer to use.
+     * @throws GeneralSecurityException A Crypto Error Occurred.
+     */
+    void encryptInPlace(byte[] data) throws GeneralSecurityException;
+
+    /**
      * Encrypts a stream using {@link #getKey()} symmetric key.
      *
      * @param in The {@link InputStream} to encrypt.
@@ -73,6 +81,14 @@ public interface ICryptor {
      * @throws GeneralSecurityException A Crypto Error Occurred.
      */
     byte[] decrypt(byte[] data) throws GeneralSecurityException;
+
+    /**
+     * Decrypts data using {@link #getKey()} symmetric key to the same passed data buffer.
+     *
+     * @param data The data buffer to use.
+     * @throws GeneralSecurityException A Crypto Error Occurred.
+     */
+    void decryptInPlace(byte[] data) throws GeneralSecurityException;
 
     /**
      * Decrypts a stream using {@link #getKey()} symmetric key.

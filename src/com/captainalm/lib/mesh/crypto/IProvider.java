@@ -7,9 +7,14 @@ package com.captainalm.lib.mesh.crypto;
  */
 public interface IProvider {
     /**
-     * Provides symmetric cryptography.
+     * Provides symmetric cryptography expecting/providing the IV in the data stream.
      */
+
     ICryptor GetCryptorInstance();
+    /**
+     * Provides symmetric cryptography with the IV provided as part of the key.
+     */
+    ICryptor GetFixedIVCryptorInstance();
 
     /**
      * Provides hashing.

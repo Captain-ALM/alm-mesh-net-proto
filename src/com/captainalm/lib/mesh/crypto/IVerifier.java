@@ -1,5 +1,7 @@
 package com.captainalm.lib.mesh.crypto;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.security.GeneralSecurityException;
 
 /**
@@ -30,5 +32,17 @@ public interface IVerifier {
      * @return If the data was verified successfully.
      * @throws GeneralSecurityException A verification issue has occurred.
      */
-    boolean verify(byte[] data, byte[] signature) throws GeneralSecurityException   ;
+    boolean verify(byte[] data, byte[] signature) throws GeneralSecurityException;
+
+    /**
+     * Verifies the data from the passed {@link InputStream}
+     * given the signature using the {@link #getPublicKey()}.
+     *
+     * @param input The {@link InputStream}.
+     * @param signature The signature to check.
+     * @return If the data was verified successfully.
+     * @throws GeneralSecurityException A verification issue has occurred.
+     * @throws IOException An I/O Error has occurred.
+     */
+    boolean verify(InputStream input, byte[] signature) throws GeneralSecurityException, IOException;
 }

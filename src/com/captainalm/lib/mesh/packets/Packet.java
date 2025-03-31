@@ -3,7 +3,7 @@ package com.captainalm.lib.mesh.packets;
 import com.captainalm.lib.mesh.crypto.ICryptor;
 import com.captainalm.lib.mesh.crypto.IHasher;
 import com.captainalm.lib.mesh.crypto.IVerifier;
-import com.captainalm.lib.mesh.packets.data.IPacketData;
+import com.captainalm.lib.mesh.packets.data.PacketData;
 import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
 import com.captainalm.lib.mesh.utils.IntOnStream;
 import com.captainalm.lib.mesh.utils.StreamEquals;
@@ -28,9 +28,17 @@ public class Packet {
      * Creates a new packet with a specified payload size.
      *
      * @param size The size of the payload.
+     * @throws IllegalArgumentException size is too small or too big.
      */
     public Packet(int size) {
+        if (size < 0 || size > Short.MAX_VALUE)
+            throw new IllegalArgumentException("size must be between 0 and Short.MAX_VALUE");
         this.data = new byte[getPacketDataStartIndex() + size + 32];
+        try {
+            IntOnStream.WriteShort(new ByteBufferOverwriteOutputStream(this.data, 2, 2), (short) size);
+        } catch (IOException ignored) {
+        }
+        this.length = (short) size;
     }
 
     /**
@@ -99,7 +107,7 @@ public class Packet {
      *
      * @return The packet payload.
      */
-    public IPacketData getPacketData() {
+    public PacketData getPacketData() {
         PacketType type = getType();
         if (type == null) return null;
         return null;
@@ -111,19 +119,23 @@ public class Packet {
      *
      * @param payload The packet payload.
      */
-    public void setPacketData(IPacketData payload) {
+    public void setPacketData(PacketData payload) {
         if (payload == null) return;
-        int copyLen = Math.min(data.length - 32 - getPacketDataStartIndex(), payload.getPacketLength());
+        int copyLen = Math.min(data.length - 32 - getPacketDataStartIndex(), payload.getSize());
         ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(data, getPacketDataStartIndex(), copyLen);
         try {
-            ovrw.write(payload.getPacketPayload(), getPacketDataStartIndex(), copyLen );
+            payload.getData().transferTo(ovrw);
         } catch (IOException e) {
         }
         if (isEncrypted()) data[1] = getType().getID();
-
     }
 
-    protected int getPacketDataStartIndex() {
+    /**
+     * Gets the payload start index in the packet.
+     *
+     * @return The payload start index.
+     */
+    public int getPacketDataStartIndex() {
         return 12;
     }
 
@@ -180,6 +192,17 @@ public class Packet {
         if (length == null)
             length = (short) (data[2] * 256 + data[3]);
         return length;
+    }
+
+    /**
+     * Gets the size of the packet.
+     *
+     * @return The size of the packet.
+     */
+    public int getPacketSize() {
+        if (length == null)
+            return 0;
+        return data.length;
     }
 
     /**

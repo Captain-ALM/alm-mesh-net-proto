@@ -24,8 +24,13 @@ public class BroadcastPacket extends Packet {
         super(size);
     }
 
+    /**
+     * Gets the payload start index in the packet.
+     *
+     * @return The payload start index.
+     */
     @Override
-    protected int getPacketDataStartIndex() {
+    public int getPacketDataStartIndex() {
         return super.getPacketDataStartIndex() + 32;
     }
 

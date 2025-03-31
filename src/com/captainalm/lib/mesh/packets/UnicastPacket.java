@@ -14,6 +14,7 @@ import java.security.GeneralSecurityException;
  * @author Alfred Manville
  */
 public class UnicastPacket extends BroadcastPacket {
+    public static final int MIN_SIZE = 124;
 
     /**
      * Creates a unicast packet from its data representation.
@@ -59,70 +60,52 @@ public class UnicastPacket extends BroadcastPacket {
      * Sets the destination address of the packet.
      *
      * @param addr The destination address.
+     * @return This instance of Packet.
      */
-    public void setDestinationAddress(byte[] addr) {
-        if (addr == null || addr.length != 32 || data == null || data.length < 124) return;
+    public UnicastPacket setDestinationAddress(byte[] addr) {
+        if (addr == null || addr.length != 32 || data == null || data.length < 124) return this;
         System.arraycopy(addr, 0, data, 44, 32);
-    }
-    /**
-     * Gets the IV of the packet for encryption.
-     *
-     * @return The IV.
-     */
-    public byte[] getIV() {
-        byte[] iv = new byte[16];
-        if (data == null || data.length < 124) return iv;
-        System.arraycopy(data, 76, iv, 0, 16);
-        return iv;
-    }
-
-    /**
-     * Sets the IV of the packet for encryption.
-     *
-     * @param iv The IV.
-     */
-    public void setIV(byte[] iv) {
-        if (iv == null || iv.length != 16 || data == null || data.length < 124) return;
-        System.arraycopy(iv, 0, data, 76, 16);
+        return this;
     }
 
     /**
      * Encrypts the packet.
      *
      * @param cProvider The {@link ICryptor} to use.
-     * @return If the encryption succeeded.
+     * @return This instance of Packet.
      */
     @Override
-    public boolean Encrypt(ICryptor cProvider) {
+    public Packet Encrypt(ICryptor cProvider) throws GeneralSecurityException {
         if (!isEncrypted()) {
             try {
                 cProvider.encryptStream(new ByteArrayInputStream(data, getPacketDataStartIndex(), getPayloadSize()),
                         new ByteBufferOverwriteOutputStream(data, getPacketDataStartIndex() - 16, getPayloadSize() + 16));
                 return super.Encrypt(cProvider);
-            } catch (IOException | GeneralSecurityException ignored) {
-                return false;
+            } catch (IOException ignored) {
+                return this;
             }
         }
-        return true;
+        return this;
     }
 
     /**
      * Decrypts the packet.
      *
      * @param cProvider The {@link ICryptor} to use.
-     * @return If the decryption succeeded.
+     * @return This instance of Packet.
+     * @throws GeneralSecurityException A security cryptographic has occurred.
      */
     @Override
-    public boolean Decrypt(ICryptor cProvider) {
+    public Packet Decrypt(ICryptor cProvider) throws GeneralSecurityException {
         if (isEncrypted()) {
             try {
                 cProvider.decryptStream(new ByteArrayInputStream(data, getPacketDataStartIndex() - 16, getPayloadSize() + 16),
                         new ByteBufferOverwriteOutputStream(data, getPacketDataStartIndex(), getPayloadSize()));
-            } catch (IOException | GeneralSecurityException ignored) {
-                return false;
+            } catch (IOException ignored) {
+                return this;
             }
             return super.Decrypt(cProvider);
         }
-        return true;
+        return this;
     }
 }

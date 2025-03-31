@@ -6,6 +6,8 @@ package com.captainalm.lib.mesh.packets;
  * @author Alfred Manville
  */
 public class BroadcastPacket extends Packet {
+    public static final int MIN_SIZE = 76;
+
     /**
      * Creates a broadcast packet from its data representation.
      *
@@ -50,9 +52,11 @@ public class BroadcastPacket extends Packet {
      * Sets the source address of the packet.
      *
      * @param addr The source address.
+     * @return This instance of Packet.
      */
-    public void setSourceAddress(byte[] addr) {
-        if (addr == null || addr.length != 32 || data == null || data.length < 76) return;
+    public BroadcastPacket setSourceAddress(byte[] addr) {
+        if (addr == null || addr.length != 32 || data == null || data.length < 76) return this;
         System.arraycopy(addr, 0, data, 12, 32);
+        return this;
     }
 }

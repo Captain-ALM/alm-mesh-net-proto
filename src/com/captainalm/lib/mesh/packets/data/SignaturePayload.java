@@ -13,7 +13,11 @@ import java.util.Arrays;
 
 /**
  * Provides a payload for signature packets.
- * {@link com.captainalm.lib.mesh.packets.PacketType#Si}
+ * {@link com.captainalm.lib.mesh.packets.PacketType#DirectSignature}
+ * {@link com.captainalm.lib.mesh.packets.PacketType#DirectHandshakeIDSignature}
+ * {@link com.captainalm.lib.mesh.packets.PacketType#DirectHandshakeDSARecommendationSignature}
+ * {@link com.captainalm.lib.mesh.packets.PacketType#BroadcastSignature}
+ * {@link com.captainalm.lib.mesh.packets.PacketType#UnicastSignature}
  *
  * @author Alfred Manville
  */

@@ -2,8 +2,10 @@ package com.captainalm.lib.mesh.packets;
 
 import com.captainalm.lib.mesh.crypto.ICryptor;
 import com.captainalm.lib.mesh.crypto.IHasher;
+import com.captainalm.lib.mesh.crypto.ISigner;
 import com.captainalm.lib.mesh.crypto.IVerifier;
 import com.captainalm.lib.mesh.packets.data.PacketData;
+import com.captainalm.lib.mesh.packets.data.SignaturePayload;
 import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
 import com.captainalm.lib.mesh.utils.IntOnStream;
 import com.captainalm.lib.mesh.utils.StreamEquals;
@@ -23,6 +25,8 @@ public class Packet {
     protected byte[] data;
     protected Short length;
     protected Long timeStamp;
+
+    public static final int MIN_SIZE = 44;
 
     /**
      * Creates a new packet with a specified payload size.
@@ -86,10 +90,12 @@ public class Packet {
      * Sets the {@link PacketType}
      *
      * @param type The packet type.
+     * @return This instance of Packet.
      */
-    public void setPacketType(PacketType type) {
-        if (data == null || data.length < 2) return;
+    public Packet setPacketType(PacketType type) {
+        if (data == null || data.length < 2) return this;
         data[1] = type.getID();
+        return this;
     }
 
     /**
@@ -118,9 +124,10 @@ public class Packet {
      * Sets the packet payload.
      *
      * @param payload The packet payload.
+     * @return This instance of Packet.
      */
-    public void setPacketData(PacketData payload) {
-        if (payload == null) return;
+    public Packet setPacketData(PacketData payload) {
+        if (payload == null) return this;
         int copyLen = Math.min(data.length - 32 - getPacketDataStartIndex(), payload.getSize());
         ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(data, getPacketDataStartIndex(), copyLen);
         try {
@@ -128,6 +135,7 @@ public class Packet {
         } catch (IOException e) {
         }
         if (isEncrypted()) data[1] = getType().getID();
+        return this;
     }
 
     /**
@@ -153,34 +161,38 @@ public class Packet {
      * Sets the TTL for the packet.
      *
      * @param ttl The number of hops remaining / 255 for infinite.
+     * @return This instance of Packet.
      */
-    public void setTTL(byte ttl) {
-        if (data == null || data.length < 1) return;
+    public Packet setTTL(byte ttl) {
+        if (data == null || data.length < 1) return this;
         data[0] = ttl;
+        return this;
     }
 
     /**
      * Encrypts the packet.
      *
      * @param cProvider The {@link ICryptor} to use.
-     * @return If the encryption succeeded.
+     * @return This instance of Packet.
+     * @throws GeneralSecurityException A security cryptographic has occurred.
      */
-    public boolean Encrypt(ICryptor cProvider) {
+    public Packet Encrypt(ICryptor cProvider) throws GeneralSecurityException {
         if (!isEncrypted())
             data[1] = getType().getEncryptedID();
-        return true;
+        return this;
     }
 
     /**
      * Decrypts the packet.
      *
      * @param cProvider The {@link ICryptor} to use.
-     * @return If the decryption succeeded.
+     * @return This instance of Packet.
+     * @throws GeneralSecurityException A security cryptographic has occurred.
      */
-    public boolean Decrypt(ICryptor cProvider) {
+    public Packet Decrypt(ICryptor cProvider) throws GeneralSecurityException {
         if (isEncrypted())
             data[1] = getType().getID();
-        return true;
+        return this;
     }
 
     /**
@@ -222,14 +234,17 @@ public class Packet {
 
     /**
      * Timestamps the packet with the current 10-minute epoch period.
+     *
+     * @return This instance of Packet.
      */
-    public void timeStamp() {
+    public Packet timeStamp() {
         timeStamp = Instant.now().getEpochSecond() / 600; // Current 10 Mins ts
         timeStamp *= 600;
         try {
             IntOnStream.WriteLong(new ByteBufferOverwriteOutputStream(data, 4, 8), timeStamp);
         } catch (IOException ignored) {
         }
+        return this;
     }
 
     /**
@@ -252,8 +267,9 @@ public class Packet {
      */
     public boolean verifyHash(IHasher hProvider) {
         try {
-            return StreamEquals.streamEquals(new ByteArrayInputStream(data, getPacketDataStartIndex() + getPayloadSize(), 32),
-                    new ByteArrayInputStream(hProvider.hashStream(new ByteArrayInputStream(data, 1, data.length - 33), data.length - 33)));
+            int pkhsz = getPacketDataStartIndex() + getPayloadSize();
+            return StreamEquals.streamEquals(new ByteArrayInputStream(data, pkhsz, 32),
+                    new ByteArrayInputStream(hProvider.hashStream(new ByteArrayInputStream(data, 1, pkhsz - 1), pkhsz - 1)));
         } catch (IOException e) {
             return false;
         }
@@ -304,13 +320,63 @@ public class Packet {
      * Recalculates the hash of the packet.
      *
      * @param hProvider The {@link IHasher} to use.
+     * @return This instance of Packet.
      */
-    public void calculateHash(IHasher hProvider) {
-        if (data == null || data.length < 34) return;
-        ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(data, getPacketDataStartIndex() + getPayloadSize(), 32);
+    public Packet calculateHash(IHasher hProvider) {
+        if (data == null || data.length < 34) return this;
+        int pkhsz = getPacketDataStartIndex() + getPayloadSize();
+        ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(data, pkhsz, 32);
         try {
-            ovrw.write(hProvider.hashStream(new ByteArrayInputStream(data, 1, data.length - 33), data.length - 33));
+            ovrw.write(hProvider.hashStream(new ByteArrayInputStream(data, 1, pkhsz - 1), pkhsz - 1));
         } catch (IOException ignored) {
         }
+        return this;
+    }
+
+    /**
+     * Gets the signature packet's for this packet.
+     * These packets are not hashed nor encrypted, this must be processed, before being sent, by the caller.
+     *
+     * @param hProvider The {@link IHasher} to use.
+     * @param sProvider The {@link ISigner} to use.
+     * @param splitSize The maximum size of a signature fragment (Not the packet or payload size).
+     * @return An array of signature packets.
+     * @throws GeneralSecurityException A cryptographic error ahs occurred.
+     */
+    public Packet[] getSignaturePackets(IHasher hProvider, ISigner sProvider, int splitSize) throws GeneralSecurityException {
+        calculateHash(hProvider);
+        byte[] hash = new byte[32];
+        System.arraycopy(data, getPacketDataStartIndex() + getPayloadSize(), hash, 0, 32);
+        SignaturePayload[] sPayloads = SignaturePayload.getFragmentedSignature(sProvider.sign(hash), hash, hProvider, splitSize);
+        Packet[] toReturn = new Packet[sPayloads.length];
+        byte[] sAddr = null;
+        byte[] dAddr = null;
+        PacketMessagingType mT = getType().getMessagingType();
+        if (mT == PacketMessagingType.Broadcast) {
+            sAddr = ((BroadcastPacket) this).getSourceAddress();
+        } else if (mT == PacketMessagingType.Unicast) {
+            sAddr = ((UnicastPacket) this).getSourceAddress();
+            dAddr = ((UnicastPacket) this).getDestinationAddress();
+        }
+        for (int i = 0; i < sPayloads.length; i++) {
+            switch (mT) {
+                case Direct -> {
+                    toReturn[i] = new Packet(Packet.MIN_SIZE + sPayloads[i].getSize()).
+                            setPacketType(PacketType.DirectSignature).setTTL(
+                                    (byte) 0).setPacketData(sPayloads[i]).timeStamp();
+                }
+                case Broadcast -> {
+                    toReturn[i] = new BroadcastPacket(BroadcastPacket.MIN_SIZE + sPayloads[i].getSize()).setSourceAddress(sAddr).
+                            setPacketType(PacketType.BroadcastSignature).setTTL(
+                                    (byte) 254).setPacketData(sPayloads[i]).timeStamp();
+                }
+                case Unicast -> {
+                    toReturn[i] = new UnicastPacket(UnicastPacket.MIN_SIZE + sPayloads[i].getSize()).setDestinationAddress(dAddr).setSourceAddress(sAddr).
+                            setPacketType(PacketType.UnicastSignature).setTTL(
+                                    (byte) 254).setPacketData(sPayloads[i]).timeStamp();
+                }
+            }
+        }
+        return toReturn;
     }
 }

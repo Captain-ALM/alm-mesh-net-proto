@@ -1,6 +1,7 @@
 package com.captainalm.lib.mesh.packets.data;
 
 import com.captainalm.lib.mesh.packets.Packet;
+import com.captainalm.lib.mesh.utils.IP;
 
 /**
  * Provides IP packet storage for 4/6.
@@ -27,9 +28,9 @@ public class DataPayload extends PacketData {
      * @param ipPacket The IP packet to encapsulate (4/6)
      */
     public DataPayload(byte[] ipPacket) {
-        super((ipPacket ==  null || ipPacket.length < 1) ? 0 : ((ipPacket[0] >> 4) == 4) ? ipPacket.length - 8 : (((ipPacket[0] >> 4) == 6) ? ipPacket.length - 32 : 0));
+        super((ipPacket ==  null || ipPacket.length < 1) ? 0 : (IP.getVersionFromPacket(ipPacket) == 4) ? ipPacket.length - 8 : (((ipPacket[0] >> 4) == 6) ? ipPacket.length - 32 : 0));
         if (ipPacket != null && ipPacket.length > 0) {
-            ver = ipPacket[0] >> 4;
+            ver = IP.getVersion(ipPacket[0]);
             if (ver == 4) {
                 System.arraycopy(ipPacket, 0, data, 0, 12);
                 System.arraycopy(ipPacket, 20, data, 12, ipPacket.length - 20);
@@ -54,7 +55,7 @@ public class DataPayload extends PacketData {
      */
     public byte[] getIpPacket(byte[] sourceNodeID, byte[] destinationNodeID) {
         if (ipPk == null && actualDataLength() > 0 && sourceNodeID != null && sourceNodeID.length > 16 && destinationNodeID != null && destinationNodeID.length > 16) {
-            ver = data[0] >> 4;
+            ver = IP.getVersion(data[dataStartIndex]);
             if (ver == 4) {
                 ipPk = new byte[actualDataLength() + 8];
                 System.arraycopy(data, dataStartIndex, ipPk, 0, 12);

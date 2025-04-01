@@ -31,6 +31,13 @@ public class DataAddressedPayload extends DataPayload {
     public DataAddressedPayload(byte[] ipPacket, boolean isSender) {
         super(ipPacket);
         treatAddressAsSender = isSender;
+        if (dataSize > 0) {
+            if (ver == 4) {
+                System.arraycopy(ipPacket, (isSender ? 12 : 16), data, dataSize - 16 + dataStartIndex, 4);
+            } else if (ver == 6) {
+                System.arraycopy(ipPacket, (isSender ? 8 : 24), data, dataSize - 16 + dataStartIndex, 16);
+            }
+        }
     }
 
     @Override

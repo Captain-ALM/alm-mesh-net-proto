@@ -5,7 +5,6 @@ import com.captainalm.lib.mesh.utils.BytesToHex;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Represents a graphing node.
@@ -18,6 +17,8 @@ public final class GraphNode {
     public final List<GraphNode> siblings = new LinkedList<>();
     public final List<GraphNode> etherealNodes = new LinkedList<>();
     public boolean isGateway;
+    private long lastEncryptionKey = 0;
+    private byte[] encryptionKey = new byte[32];
 
     /**
      * Constructs a new GraphNode.
@@ -42,6 +43,7 @@ public final class GraphNode {
             for (GraphNode etherealNode : other.etherealNodes)
                 if (!this.etherealNodes.contains(etherealNode))
                     this.etherealNodes.add(etherealNode);
+            setEncryptionKey(other.encryptionKey, other.lastEncryptionKey);
         }
     }
 
@@ -63,5 +65,27 @@ public final class GraphNode {
     public void combineEthereal(GraphNode etherealNode) {
         if (!this.etherealNodes.contains(etherealNode))
             this.etherealNodes.add(etherealNode);
+    }
+
+    /**
+     * Gets the E2E encryption key.
+     *
+     * @return The E2E encryption key.
+     */
+    public byte[] getEncryptionKey() {
+        return encryptionKey;
+    }
+
+    /**
+     * Sets the encryption key (If timestamp is younger).
+     *
+     * @param encryptionKey The encryption key.
+     * @param timestamp The timestamp.
+     */
+    public void setEncryptionKey(byte[] encryptionKey, long timestamp) {
+        if (timestamp < lastEncryptionKey || encryptionKey == null || encryptionKey.length != 32)
+            return;
+        lastEncryptionKey = timestamp;
+        this.encryptionKey = encryptionKey;
     }
 }

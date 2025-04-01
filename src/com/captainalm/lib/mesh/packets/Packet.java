@@ -4,8 +4,7 @@ import com.captainalm.lib.mesh.crypto.ICryptor;
 import com.captainalm.lib.mesh.crypto.IHasher;
 import com.captainalm.lib.mesh.crypto.ISigner;
 import com.captainalm.lib.mesh.crypto.IVerifier;
-import com.captainalm.lib.mesh.packets.data.PacketData;
-import com.captainalm.lib.mesh.packets.data.SignaturePayload;
+import com.captainalm.lib.mesh.packets.data.*;
 import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
 import com.captainalm.lib.mesh.utils.IntOnStream;
 import com.captainalm.lib.mesh.utils.StreamEquals;
@@ -111,13 +110,54 @@ public class Packet {
     /**
      * Gets the data object that represents the packet payload.
      *
+     * @param wasReceived If the packet was received and not created by this node.
      * @return The packet payload.
      */
-    public PacketData getPacketData() {
+    public PacketData getPacketData(boolean wasReceived) {
         PacketType type = getType();
         if (type == null) return null;
+        switch (type) {
+            case DirectHandshakeDSARecommendationKey, DirectHandshakeAccept, UnicastEncryptionRequestHandshake,
+                 UnicastEncryptionResponseHandshake, UnicastOnionCircuitRejected,UnicastOnionCircuitBroken-> {
+                return new SinglePayload(this);
+            }
+            case DirectSignature, DirectHandshakeIDSignature, DirectHandshakeDSARecommendationSignature,
+                 BroadcastSignature,UnicastSignature-> {
+                return new SignaturePayload(this);
+            }
+            case UnicastOnion -> {
+                return new OnionPayload(this);
+            }
+            case DirectGraphing, BroadcastGraphing, DirectNodesEID -> {
+                return new NodeAssociationPayload(this, type != PacketType.DirectNodesEID);
+            }
+            case BroadcastGateway -> {
+                return new GatewayPayload(this);
+            }
+            case UnicastData -> {
+                return new DataPayload(this);
+            }
+            case UnicastDataAddressed -> {
+                return new DataAddressedPayload(this, wasReceived);
+            }
+            case UnicastOnionCircuitCreateEndpoint -> {
+                return new CircuitCreateEndpointPayload(this);
+            }
+            case UnicastOnionCircuitCreated -> {
+                return new CircuitCreatedPayload(this);
+            }
+            case UnicastOnionCircuitCreate -> {
+                return new CircuitCreatePayload(this);
+            }
+            case BroadcastNodeDead, BroadcastDeAssociateEID -> {
+                return new AssociatePayload(this);
+            }
+            case DirectHandshakeKEMKey, DirectHandshakeDSAKey, BroadcastAssociateEID,
+                 BroadcastAssociateKEMKey, BroadcastAssociateDSAKey -> {
+                return new AssociatedPayload(this);
+            }
+        }
         return null;
-        // TODO: this
     }
 
     /**

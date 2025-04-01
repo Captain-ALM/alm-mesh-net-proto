@@ -21,6 +21,7 @@ public interface IUnwrapper extends IWrapper {
      * @param key The new private key.
      */
     void setPrivateKey(byte[] key);
+
     /**
      * Unwraps the passed data using the {@link #getPrivateKey()}.
      *

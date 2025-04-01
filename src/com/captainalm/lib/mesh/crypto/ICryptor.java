@@ -35,6 +35,7 @@ public interface ICryptor {
      * @throws GeneralSecurityException A Crypto Error Occurred.
      */
     int encryptToStream(byte[] data, OutputStream out) throws IOException, GeneralSecurityException;
+
     /**
      * Encrypts data using {@link #getKey()} symmetric key.
      *

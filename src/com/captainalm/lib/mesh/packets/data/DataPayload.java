@@ -4,6 +4,7 @@ import com.captainalm.lib.mesh.packets.Packet;
 
 /**
  * Provides IP packet storage for 4/6.
+ * {@link com.captainalm.lib.mesh.packets.PacketType#UnicastData}
  *
  * @author Alfred Manville
  */

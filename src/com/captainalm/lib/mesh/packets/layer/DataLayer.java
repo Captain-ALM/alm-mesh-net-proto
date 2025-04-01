@@ -46,11 +46,14 @@ public class DataLayer extends OnionLayer {
     }
 
     /**
-     * Gets the encapsulated packet.
+     * Gets the encapsulated packet,
+     * null if still {@link #isEncrypted()}.
      *
-     * @return The encapsulated packet.
+     * @return The encapsulated packet or null.
      */
     public Packet getPacket() {
+        if (isEncrypted())
+            return null;
         Packet packet = new UnicastPacket(dataSize - 121);
         packet.getPacketBytes()[0] = (byte) 254;
         packet.getPacketBytes()[1] = data[dataStartIndex];

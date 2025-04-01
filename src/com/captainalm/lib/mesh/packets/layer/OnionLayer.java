@@ -168,11 +168,12 @@ public class OnionLayer {
 
     /**
      * Gets the sub-layer.
+     * null if still {@link #isEncrypted()}.
      *
-     * @return The sub-layer or null for no sub layer.
+     * @return The sub-layer or null.
      */
     public OnionLayer getSubLayer() {
-        if (subLayer == null && dataSize - 33 > 32) {
+        if (subLayer == null && dataSize - 33 > 32 && !isEncrypted()) {
             if (data[dataStartIndex + 33] == PacketType.UnicastOnion.getID())
                 subLayer = new OnionLayer(data, dataStartIndex + 33, dataSize - 33);
             else

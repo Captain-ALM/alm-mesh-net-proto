@@ -20,9 +20,12 @@ public abstract class PacketData {
      * @param packet The packet to construct from.
      */
     public PacketData(Packet packet) {
-        data = packet.getPacketBytes();
-        dataStartIndex = packet.getPacketDataStartIndex();
-        dataSize = packet.getPayloadSize();
+        if (packet != null) {
+            data = packet.getPacketBytes();
+            dataStartIndex = packet.getPacketDataStartIndex();
+            dataSize = packet.getPayloadSize();
+        } else
+            this.data = new byte[0];
     }
 
     /**
@@ -35,6 +38,21 @@ public abstract class PacketData {
         dataStartIndex = 0;
         dataSize = size;
     }
+
+    /**
+     * Constructs a new instance of PacketData with the specified payload.
+     *
+     * @param data The payload to store.
+     */
+    public PacketData(byte[] data) {
+        if (data != null) {
+            this.data = data;
+            dataStartIndex = 0;
+            dataSize = data.length;
+        } else
+            this.data = new byte[0];
+    }
+
 
     /**
      * Gets the packet payload data.

@@ -15,8 +15,9 @@ public interface ICryptor {
      * Sets the symmetric key.
      *
      * @param key The secret key.
+     * @return This icryptor instance.
      */
-    void setKey(byte[] key);
+    ICryptor setKey(byte[] key);
 
     /**
      * Gets the symmetric key.

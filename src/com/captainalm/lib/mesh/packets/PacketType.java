@@ -7,6 +7,7 @@ package com.captainalm.lib.mesh.packets;
  * @author Alfred Manville
  */
 public enum PacketType {
+    Unknown(0),
     DirectHandshakeKEMKey(1),
     DirectHandshakeDSAKey(2),
     DirectHandshakeIDSignature(3),
@@ -135,7 +136,7 @@ public enum PacketType {
             case 31:
                 return UnicastSignature;
         }
-        return null;
+        return Unknown;
     }
 
     /**
@@ -144,7 +145,7 @@ public enum PacketType {
      * @return The messaging type.
      */
     public PacketMessagingType getMessagingType() {
-        if (id > 0 && id < 12) {
+        if (id >= 0 && id < 12) {
             return PacketMessagingType.Direct;
         } else if (id > 11 && id < 20) {
             return PacketMessagingType.Broadcast;

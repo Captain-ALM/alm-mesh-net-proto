@@ -49,7 +49,7 @@ public class Packet {
      *
      * @param packet The packet data.
      */
-    public Packet(byte[] packet) {
+    protected Packet(byte[] packet) {
         this.data = packet;
     }
 
@@ -363,7 +363,7 @@ public class Packet {
      * @return This instance of Packet.
      */
     public Packet calculateHash(IHasher hProvider) {
-        if (data == null || data.length < 34) return this;
+        if (data == null || data.length - getPacketDataStartIndex() - getPayloadSize() < 32) return this;
         int pkhsz = getPacketDataStartIndex() + getPayloadSize();
         ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(data, pkhsz, 32);
         try {
@@ -384,6 +384,7 @@ public class Packet {
      * @throws GeneralSecurityException A cryptographic error ahs occurred.
      */
     public Packet[] getSignaturePackets(IHasher hProvider, ISigner sProvider, int splitSize) throws GeneralSecurityException {
+        if (data == null || data.length - getPacketDataStartIndex() - getPayloadSize() < 32) return new Packet[0];
         calculateHash(hProvider);
         byte[] hash = new byte[32];
         System.arraycopy(data, getPacketDataStartIndex() + getPayloadSize(), hash, 0, 32);
@@ -418,5 +419,51 @@ public class Packet {
             }
         }
         return toReturn;
+    }
+
+    /**
+     * Decrements the TTL, does nothing if 255 or 0.
+     *
+     * @return This packet instance.
+     */
+    public Packet decrementTTL() {
+        if (data == null || data.length < 1) return this;
+        data[0] = (data[0] == (byte) 255 || data[0] == 0) ? data[0] : (byte) (data[0] - (byte) 1);
+        return this;
+    }
+
+    /**
+     * Gets the packet hash.
+     * {@link #calculateHash(IHasher)} should be called first otherwise the hash will be empty.
+     *
+     * @return The hash of the pavket.
+     */
+    public byte[] getHash() {
+        byte[] hash = new byte[32];
+        if (data == null || data.length - getPacketDataStartIndex() - getPayloadSize() < 32) return hash;
+        System.arraycopy(data, getPacketDataStartIndex() + getPayloadSize(), hash, 0, 32);
+        return hash;
+    }
+
+    /**
+     * Gets the correct instance type of a packet, given its bytes.
+     *
+     * @param data The packet byte data.
+     * @return The correct instance of the packet.
+     */
+    public static Packet getPacketFromBytes(byte[] data) {
+        if (data == null || data.length < 2)
+            throw new IllegalArgumentException("packet data is invalid");
+        switch (PacketType.fromID(data[1]).getMessagingType()) {
+            case Broadcast -> {
+                return new BroadcastPacket(data);
+            }
+            case Unicast -> {
+                return new UnicastPacket(data);
+            }
+            default -> {
+                return new Packet(data);
+            }
+        }
     }
 }

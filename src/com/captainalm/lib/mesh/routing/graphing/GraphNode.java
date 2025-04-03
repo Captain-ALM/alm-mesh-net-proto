@@ -1,10 +1,11 @@
 package com.captainalm.lib.mesh.routing.graphing;
 
+import com.captainalm.lib.mesh.transport.INetTransport;
 import com.captainalm.lib.mesh.utils.BytesToHex;
 
 import java.util.Arrays;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Represents a graphing node.
@@ -14,11 +15,18 @@ import java.util.List;
 public final class GraphNode {
     public final byte[] ID;
     public final String nodeID;
-    public final List<GraphNode> siblings = new LinkedList<>();
-    public final List<GraphNode> etherealNodes = new LinkedList<>();
+    public final List<GraphNode> siblings = new CopyOnWriteArrayList<>();
+    public final List<GraphNode> etherealNodes = new CopyOnWriteArrayList<>();
     public boolean isGateway;
     private long lastEncryptionKey = 0;
     private byte[] encryptionKey = new byte[32];
+    public byte[] kemKey;
+    public byte[] dsaKey;
+    private byte[] ipv4;
+    private byte[] ipv6;
+    private String ipv4Str;
+    private String ipv6Str;
+    public INetTransport transport;
 
     /**
      * Constructs a new GraphNode.
@@ -44,6 +52,20 @@ public final class GraphNode {
                 if (!this.etherealNodes.contains(etherealNode))
                     this.etherealNodes.add(etherealNode);
             setEncryptionKey(other.encryptionKey, other.lastEncryptionKey);
+            if (this.ipv4 == null) {
+                this.ipv4 = other.ipv4;
+                this.ipv4Str = other.ipv4Str;
+            }
+            if (this.ipv6 == null) {
+                this.ipv6 = other.ipv6;
+                this.ipv6Str = other.ipv6Str;
+            }
+            if (this.dsaKey == null)
+                this.dsaKey = other.dsaKey;
+            if (this.kemKey == null)
+                this.kemKey = other.kemKey;
+            if (this.transport == null)
+                this.transport = other.transport;
         }
     }
 
@@ -87,5 +109,71 @@ public final class GraphNode {
             return;
         lastEncryptionKey = timestamp;
         this.encryptionKey = encryptionKey;
+    }
+
+    /**
+     * Gets the IPv4 Address for this node.
+     *
+     * @return The IPv4 Address.
+     */
+    public byte[] getIPv4Address() {
+        if (ipv4 == null) {
+            ipv4 = new byte[4];
+            ipv4[0] = 10;
+            System.arraycopy(ID, 0, ipv4, 1, 3);
+            ipv4Str = BytesToHex.bytesToHex(ipv4);
+        }
+        return ipv4;
+    }
+
+    /**
+     * Gets the IPv6 Address for this node.
+     *
+     * @return The IPv6 Address.
+     */
+    public byte[] getIPv6Address() {
+        if (ipv6 == null) {
+            ipv6 = new byte[16];
+            ipv6[0] = (byte) 253;
+            ipv6[1] = 10;
+            System.arraycopy(ID, ID.length - 14, ipv6, 2, 14);
+            ipv6Str = BytesToHex.bytesToHex(ipv6);
+        }
+        return ipv6;
+    }
+
+    /**
+     * Gets the IPv4 Address string of the node (In hexadecimal).
+     *
+     * @return The hexadecimal address.
+     */
+    public String getIPv4AddressString() {
+        if (ipv4Str == null)
+            getIPv4Address();
+        return ipv4Str;
+    }
+
+    /**
+     * Gets the IPv6 Address string of the node (In hexadecimal).
+     *
+     * @return The hexadecimal address.
+     */
+    public String getIPv6AddressString() {
+        if (ipv6Str == null)
+            getIPv6Address();
+        return ipv6Str;
+    }
+
+    /**
+     * Gets whether this node owns an ethereal ID.
+     *
+     * @param eid The ethereal ID to check ownership of.
+     * @return If this node is owned.
+     */
+    public boolean ownsEID(byte[] eid) {
+        for (GraphNode etherealNode : etherealNodes)
+            if (Arrays.equals(etherealNode.ID, eid))
+                return true;
+        return false;
     }
 }

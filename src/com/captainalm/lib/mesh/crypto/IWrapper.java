@@ -19,8 +19,9 @@ public interface IWrapper {
      * Sets the public key for wrapping.
      *
      * @param key The new public key.
+     * @return This iwrapper instance.
      */
-    void setPublicKey(byte[] key);
+    IWrapper setPublicKey(byte[] key);
 
     /**
      * Wraps the passed key given the signature using the {@link #getPublicKey()}.

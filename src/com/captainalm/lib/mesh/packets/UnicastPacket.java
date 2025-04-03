@@ -16,12 +16,7 @@ import java.security.GeneralSecurityException;
 public class UnicastPacket extends BroadcastPacket {
     public static final int MIN_SIZE = 124;
 
-    /**
-     * Creates a unicast packet from its data representation.
-     *
-     * @param packet The packet data.
-     */
-    public UnicastPacket(byte[] packet) {
+    protected UnicastPacket(byte[] packet) {
         super(packet);
     }
 

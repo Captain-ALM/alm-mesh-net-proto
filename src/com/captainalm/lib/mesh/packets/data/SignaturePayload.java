@@ -176,16 +176,20 @@ public class SignaturePayload extends PacketData {
      * Gets the signature given the {@link SignaturePayload}s IN ORDER.
      *
      * @param fragments The signature payloads.
+     * @param signatureHash The hash of the signature.
      * @param hProvider The hash provider to validate the assembled signature with.
      * @return The signature or an empty byte array on validation failure.
      */
-    public static byte[] getSignatureFromFragments(SignaturePayload[] fragments, IHasher hProvider) {
+    public static byte[] getSignatureFromFragments(SignaturePayload[] fragments, byte[] signatureHash, IHasher hProvider) {
         byte[] signature = new byte[fragments[0].getSignatureLength()];
         OutputStream out = new ByteBufferOverwriteOutputStream(signature, 0, signature.length);
         for (SignaturePayload fragment : fragments)
-            fragment.writeSignatureFragment(out);
+            if (fragment == null)
+                return new byte[0];
+            else
+                fragment.writeSignatureFragment(out);
         byte[] cHash =  hProvider.hash(signature);
-        if (!Arrays.equals(cHash, signature))
+        if (!Arrays.equals(cHash, signatureHash))
             return new byte[0];
         return signature;
     }

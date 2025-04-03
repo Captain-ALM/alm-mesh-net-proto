@@ -21,8 +21,9 @@ public interface IVerifier {
      * Sets the public key for verifying.
      *
      * @param key The new public key.
+     * @return This iverifier instance.
      */
-    void setPublicKey(byte[] key);
+    IVerifier setPublicKey(byte[] key);
 
     /**
      * Verifies the data given the signature using the {@link #getPublicKey()}.

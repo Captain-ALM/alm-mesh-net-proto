@@ -8,12 +8,7 @@ package com.captainalm.lib.mesh.packets;
 public class BroadcastPacket extends Packet {
     public static final int MIN_SIZE = 76;
 
-    /**
-     * Creates a broadcast packet from its data representation.
-     *
-     * @param packet The packet data.
-     */
-    public BroadcastPacket(byte[] packet) {
+    protected BroadcastPacket(byte[] packet) {
         super(packet);
     }
 

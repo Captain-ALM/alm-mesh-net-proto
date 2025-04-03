@@ -21,8 +21,9 @@ public interface ISigner extends IVerifier {
      * Sets the private key for signing.
      *
      * @param key The new private key.
+     * @return This isigner instance.
      */
-    void setPrivateKey(byte[] key);
+    ISigner setPrivateKey(byte[] key);
 
     /**
      * Signs the passed data using the {@link #getPrivateKey()}.

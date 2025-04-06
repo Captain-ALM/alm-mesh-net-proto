@@ -242,6 +242,15 @@ public class Router {
     protected void processOnion(UnicastPacket packet) {
         if (packet.getType() == PacketType.UnicastOnionCircuitBroken && packet.getPacketData(true) instanceof SinglePayload sp)
             deleteCircuit(sp.getPayload());
+        else if (packet.getType() == PacketType.UnicastOnionCircuitCreated && packet.getPacketData(true) instanceof  CircuitCreatedPayload crtdp) {
+
+        } else if (packet.getType() == PacketType.UnicastOnionCircuitRejected && packet.getPacketData(true) instanceof SinglePayload sp) {
+
+        } else if (packet.getType() == PacketType.UnicastOnionCircuitCreate && packet.getPacketData(true) instanceof  CircuitCreatePayload ccpl) {
+
+        } else if (packet.getType() == PacketType.UnicastOnionCircuitCreateEndpoint && packet.getPacketData(true) instanceof CircuitCreateEndpointPayload ccep) {
+
+        }
         //TODO: Handle the other onion circuit packet types
         else if (packet.getPacketData(true) instanceof OnionPayload onionPayload) {
             GraphNode csNode = onionCircuitInitToInit.get(onionPayload.getLayer().getCircuitIDString());
@@ -272,12 +281,17 @@ public class Router {
                     } catch (GeneralSecurityException ignored) {
                     }
                 } else if (initKey != null) {
-                    //TODO: Handle handshake through circuit
                     if (onionPayload.getLayer() instanceof DataLayer odl) {
                         try {
                             Packet toSend = ((DataLayer) odl.decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))).getPacket();
-                            //TODO: Check sender is thisNode, and register the R/NID of the payload before sending
-                        } catch (GeneralSecurityException e) {
+                            if (toSend instanceof UnicastPacket upkts && (upkts.getType() == PacketType.UnicastOnionCircuitCreate ||
+                                    upkts.getType() == PacketType.UnicastOnionCircuitCreateEndpoint) &&
+                                    toSend.getPacketData(true) instanceof CircuitCreatePayload ccp &&
+                            Arrays.equals(upkts.getSourceAddress(),thisNode.ID)) {
+                                nIDtoOnionCircuitID.put(BytesToHex.bytesToHex(ccp.getNonceStream().readAllBytes()), onionPayload.getLayer().getCircuitIDString());
+                                send((BroadcastPacket) toSend);
+                            }
+                        } catch (GeneralSecurityException ignored) {
                         }
                     }
                 }
@@ -408,6 +422,8 @@ public class Router {
                 hopInfoStore.put(node, new NodeHopInfo(node, 0));
                 hopProcessor(hopInfoStore, node, node, 0);
             }
+            missingNetwork.removeAll(thisNode.etherealNodes);
+            missingNetwork.remove(thisNode);
             for (Map.Entry<GraphNode, NodeHopInfo> entry : hopInfoStore.entrySet()) {
                 nextHop.put(entry.getKey().nodeID, entry.getValue().connectedTransport);
                 missingNetwork.remove(entry.getKey());
@@ -565,6 +581,7 @@ public class Router {
     }
 
     public void send(BroadcastPacket packet) {
+        //TODO: Handle send and route for the destination being this node, or an ethereal owned by this node
         byte[] key = null;
         PacketType pt = packet.getType();
         if (pt != PacketType.UnicastSignature && pt != PacketType.UnicastEncryptionRejectedHandshake &&

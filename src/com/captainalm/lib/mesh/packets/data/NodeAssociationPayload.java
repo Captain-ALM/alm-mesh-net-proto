@@ -59,21 +59,31 @@ public class NodeAssociationPayload extends PacketData {
 
     /**
      * Gets the {@link GraphNode} object, using existing instances
-     * and adding new ones if needed to a map.
+     * and adding new ones if needed to a map; also provides address mappings,
+     * rejecting adding the encapsulated node (Returning null, in the event of
+     * a collision).
      *
      * @param graphNodes A map of existing graph nodes.
-     * @return The graph node.
+     * @param addressToGraphNode A map of hex IP addresses to graph nodes.
+     * @return The graph node or null for rejection.
      */
-    public GraphNode getNode(Map<String,GraphNode> graphNodes) {
-        if (node == null && graphNodes != null) {
+    public GraphNode getNode(Map<String,GraphNode> graphNodes, Map<String, GraphNode> addressToGraphNode) {
+        if (node == null && graphNodes != null && addressToGraphNode != null) {
             byte[] thisNode = new byte[32];
             System.arraycopy(data, dataStartIndex, thisNode, 0, 32);
             String thisNodeStr = BytesToHex.bytesToHex(thisNode);
             if (graphNodes.containsKey(thisNodeStr)) {
                 node = graphNodes.get(thisNodeStr);
             } else {
-                node = new GraphNode(thisNode);
+                GraphNode lNode = new GraphNode(thisNode);
+                if (addressToGraphNode.containsKey(lNode.getIPv4AddressString())
+                || addressToGraphNode.containsKey(lNode.getIPv6AddressString())) {
+                    return null;
+                }
+                node = lNode;
                 graphNodes.put(thisNodeStr, node);
+                addressToGraphNode.put(lNode.getIPv4AddressString(), lNode);
+                addressToGraphNode.put(lNode.getIPv6AddressString(), lNode);
             }
             for (int pos = dataStartIndex + 32; pos < dataStartIndex + dataSize; pos+= 32) {
                 byte[] cNode = new byte[32];

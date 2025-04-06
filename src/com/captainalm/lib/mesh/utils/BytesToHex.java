@@ -2,7 +2,6 @@ package com.captainalm.lib.mesh.utils;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -56,5 +55,23 @@ public class BytesToHex {
             hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
         }
         return new String(hexChars, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Converts a hexadecimal string into a byte array.
+     *
+     * @param hex The hexadecimal string.
+     * @return The converted byte array.
+     */
+    public static byte[] hexToBytes(String hex) {
+        if (hex == null || hex.isEmpty())
+            return new byte[0];
+        byte[] result = new byte[hex.length() / 2 + hex.length() % 2];
+        for (int i = 0; i < hex.length(); i+=2) {
+            result[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4));
+            if (i + 1 < hex.length())
+                result[i / 2] += (byte) Character.digit(hex.charAt(i+1), 16);
+        }
+        return result;
     }
 }

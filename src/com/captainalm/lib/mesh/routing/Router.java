@@ -1,12 +1,10 @@
 package com.captainalm.lib.mesh.routing;
 
 import com.captainalm.lib.mesh.crypto.IProvider;
-import com.captainalm.lib.mesh.packets.BroadcastPacket;
-import com.captainalm.lib.mesh.packets.Packet;
-import com.captainalm.lib.mesh.packets.PacketType;
-import com.captainalm.lib.mesh.packets.UnicastPacket;
-import com.captainalm.lib.mesh.packets.data.SignaturePayload;
-import com.captainalm.lib.mesh.packets.data.SinglePayload;
+import com.captainalm.lib.mesh.packets.*;
+import com.captainalm.lib.mesh.packets.data.*;
+import com.captainalm.lib.mesh.packets.layer.DataLayer;
+import com.captainalm.lib.mesh.packets.layer.OnionLayer;
 import com.captainalm.lib.mesh.routing.graphing.GraphNode;
 import com.captainalm.lib.mesh.transport.INetTransport;
 import com.captainalm.lib.mesh.utils.BytesToHex;
@@ -14,6 +12,7 @@ import com.captainalm.lib.mesh.utils.StreamEquals;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
@@ -24,7 +23,9 @@ import java.util.concurrent.*;
  * @author Alfred Manville
  */
 public class Router {
-    protected final Random random = new Random();
+    protected final Random random = new SecureRandom();
+    protected final IPacketProcessor pkProcessor;
+    protected boolean active;
 
     private final Object packetChargeLock = new Object();
     protected PacketStore freeStore;
@@ -32,30 +33,330 @@ public class Router {
     protected PacketStore oldestStore;
     protected final Map<String, PacketStore> packetStore = new HashMap<>();
     protected final Map<String, GraphNode> network = new ConcurrentHashMap<>(); // ID to graph node
-    protected final Map<String, GraphNode> networkAddresses = new HashMap<>(); // IP Address (Hex) to graph node
+    protected final Map<String, GraphNode> networkAddresses = new ConcurrentHashMap<>(); // IP Address (Hex) to graph node
     protected final List<GraphNode> gateways = new CopyOnWriteArrayList<>();
 
     private final List<GraphNode> hopObjects = new ArrayList<>();
     private final Object nextHopLock = new Object();
     private final Map<String, GraphNode> nextHop = new HashMap<>(); // ID to next hop
 
-    protected Map<String, DataLinkProcessor> dataLinks = new ConcurrentHashMap<>(); //ID to data links;
-    protected BlockingQueue<BroadcastPacket> receiveQueue = new LinkedBlockingQueue<>();
+    protected final Map<String, DataLinkProcessor> dataLinks = new ConcurrentHashMap<>(); //ID to data links;
+    protected final BlockingQueue<Packet> receiveQueue = new LinkedBlockingQueue<>();
+    protected final Thread receiveThread = new Thread(() -> {
+        while (active) {
+            try {
+                protectedReceive(receiveQueue.take());
+            } catch (InterruptedException ignored) {
+            }
+        }
+    });
 
     protected byte maxTTL;
     protected boolean requireE2E;
     protected boolean ignoreNonE2E;
     protected boolean e2eEnabled;
-    protected GraphNode thisNode;
-    protected IProvider cryptoProvider;
+    protected final GraphNode thisNode;
+    protected final IProvider cryptoProvider;
 
-    protected final Map<String,GraphNode> onionCircuitToInit = new HashMap<>(); //Init OCID to Init Address
     protected final Map<String, byte[]> onionCircuitInitToEncryptionKey = new HashMap<>(); //Init OCID to Encryption Key
+
     protected final Map<String,String> onionCircuitInitToOnionCircuitRemote = new HashMap<>(); //Init OCID to Remote OCID / Ethereal Address
     protected final Map<String,String> onionCircuitRemoteToOnionCircuitInit = new HashMap<>(); //Remote OCID / Ethereal Address to Init OCID
-    protected final Map<String,String> onionCircuitRemoteToRemote = new HashMap<>(); //Remote OCID to Remote Address
-    protected final List<byte[]> onionCircuitIDs = new ArrayList<>(); // List of all registered onion circuit IDs
-    
+
+    protected final Map<String,GraphNode> onionCircuitInitToInit = new HashMap<>(); //Init OCID to Init Node
+
+    protected final Map<String,GraphNode> onionCircuitRemoteToRemote = new HashMap<>(); //Remote OCID to Remote Node
+
+    protected final List<String> onionCircuitIDs = new ArrayList<>(); // List of all registered onion circuit IDs
+    protected final Map<String, String> nIDtoOnionCircuitID = new HashMap<>(); // N ID to Onion circuit ID
+    protected final Map<String,GraphNode> etherealNodeToOwner = new HashMap<>();
+    private final Object lockOnionCircuitIDs = new Object();
+
+    protected void protectedReceive(Packet packet) {
+        PacketType pt = packet.getType();
+        if (pt.getMessagingType() != PacketMessagingType.Unicast)
+            processBroadcast(packet);
+        else if (packet instanceof UnicastPacket upk) {
+            if (thisNode.ownsEID(upk.getDestinationAddress()))
+                processEthereal(upk);
+            else {
+                try {
+                    if (pt == PacketType.UnicastOnionCircuitCreated && packet.getPacketData(true) instanceof CircuitCreatedPayload ocp
+                    && !nIDtoOnionCircuitID.containsKey(BytesToHex.bytesToHexFromStreamWithSize(ocp.getNonceStream(), 16)))
+                        pkProcessor.processPacket(packet);
+                    else if (pt == PacketType.UnicastOnionCircuitRejected && packet.getPacketData(true) instanceof SinglePayload sp
+                    && !nIDtoOnionCircuitID.containsKey(BytesToHex.bytesToHexFromStreamWithSize(sp.getPayloadStream(), 16)))
+                        pkProcessor.processPacket(packet);
+                    else if (pt == PacketType.UnicastOnionCircuitBroken || pt == PacketType.UnicastOnion) {
+                        processOnion(upk);
+                        pkProcessor.processPacket(packet);
+                    }
+                    else if (pt == PacketType.UnicastOnionCircuitCreated || pt == PacketType.UnicastOnionCircuitCreate ||
+                    pt == PacketType.UnicastOnionCircuitCreateEndpoint ||
+                    pt == PacketType.UnicastOnionCircuitRejected)
+                        processOnion(upk);
+                    else
+                        pkProcessor.processPacket(packet);
+                } catch (IOException ignored) {
+                }
+            }
+        }
+    }
+
+    protected void processBroadcast(Packet packet) {
+        PacketData payload = packet.getPacketData(true);
+        if (payload instanceof AssociatedPayload adp) {
+            switch (packet.getType()) {
+                case BroadcastAssociateEID -> {
+                    GraphNode owner = network.get(BytesToHex.bytesToHex(adp.getAssociatedPayload()));
+                    if (owner != null)
+                        registerEtherealNode(new GraphNode(adp.getAssociateID()), owner);
+                }
+                case BroadcastAssociateKEMKey, BroadcastAssociateDSAKey -> {
+                    GraphNode owner = network.get(BytesToHex.bytesToHex(adp.getAssociateID()));
+                    if (owner != null)
+                        owner.kemKey = adp.getAssociatedPayload();
+                }
+            }
+        } else if (payload instanceof AssociatePayload ap) {
+            switch (packet.getType()) {
+                case BroadcastDeAssociateEID, BroadcastNodeDead -> removeNode(network.get(BytesToHex.bytesToHex(ap.getAssociateID())));
+            }
+        } else if (payload instanceof NodeAssociationPayload nap) {
+            switch (packet.getType()) {
+                case DirectGraphing:
+                    send((BroadcastPacket) new BroadcastPacket(nap.getSize()).setSourceAddress(thisNode.ID)
+                            .setPacketData(nap).setPacketType(PacketType.BroadcastGraphing).setTTL(maxTTL)
+                            .timeStamp());
+                case BroadcastGraphing, DirectNodesEID:
+                    nap.getNode(network, networkAddresses);
+                    resetNextHops();
+                    break;
+            }
+        } else if (payload instanceof GatewayPayload gp &&
+        packet.getType() == PacketType.BroadcastGateway)
+            gp.getGateways(network, gateways, networkAddresses);
+    }
+
+    private void registerEtherealNode(GraphNode node, GraphNode owner) {
+        owner.etherealNodes.add(node);
+        etherealNodeToOwner.put(node.nodeID, owner)
+;       network.put(node.nodeID, node);
+        networkAddresses.put(owner.getIPv4AddressString(), node);
+        networkAddresses.put(owner.getIPv6AddressString(), node);
+        resetNextHops();
+    }
+
+    private void removeNode(GraphNode node) {
+        GraphNode owner = etherealNodeToOwner.get(node.nodeID);
+        if (owner != null) {
+            owner.etherealNodes.remove(node);
+            etherealNodeToOwner.remove(node.nodeID);
+        }
+        network.remove(node.nodeID);
+        networkAddresses.remove(node.getIPv4AddressString());
+        networkAddresses.remove(node.getIPv6AddressString());
+        if (node.isGateway)
+            gateways.remove(node);
+        String[] localOIDs = new String[0];
+        localOIDs = node.initOnionIDs.toArray(localOIDs);
+        for (String oid : localOIDs)
+            deleteCircuit(BytesToHex.hexToBytes(oid));
+        localOIDs = node.remoteOnionIDs.toArray(new String[0]);
+        for (String oid : localOIDs)
+            deleteCircuit(BytesToHex.hexToBytes(oid));
+        resetNextHops();
+    }
+
+    protected void deleteCircuit(byte[] circuitID) {
+        String strCID = BytesToHex.bytesToHex(circuitID);
+        BroadcastPacket toSend = null;
+        PacketData sendPayload = null;
+        BroadcastPacket toSend2 = null;
+        PacketData sendPayload2 = null;
+        if (onionCircuitInitToOnionCircuitRemote.containsKey(strCID)) {
+            String ocr = onionCircuitInitToOnionCircuitRemote.get(strCID);
+            onionCircuitInitToOnionCircuitRemote.remove(strCID);
+            if (ocr != null)
+                onionCircuitRemoteToOnionCircuitInit.remove(ocr);
+            GraphNode initNode = onionCircuitInitToInit.remove(strCID);
+            GraphNode remoteNode;
+            if (initNode != null) {
+                initNode.initOnionIDs.remove(strCID);
+                onionCircuitInitToEncryptionKey.remove(strCID);
+                sendPayload = new SinglePayload(circuitID);
+                toSend = (BroadcastPacket) new UnicastPacket(sendPayload.getSize()).setDestinationAddress(initNode.ID)
+                        .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitBroken);
+            }
+            removeCircuitID(circuitID);
+            if (ocr != null && ocr.length() == 64) {
+                GraphNode eNode = network.get(ocr);
+                if (eNode != null) {
+                    sendPayload2 = new AssociatePayload(eNode.ID);
+                    toSend2 = (BroadcastPacket) new BroadcastPacket(sendPayload2.getSize()).setSourceAddress(thisNode.ID)
+                            .setTTL(maxTTL).setPacketType(PacketType.BroadcastDeAssociateEID);
+                    removeNode(eNode);
+                }
+            } else if (ocr != null) {
+                sendPayload = new SinglePayload(circuitID);
+                remoteNode = onionCircuitRemoteToRemote.remove(ocr);
+                if (remoteNode != null) {
+                    remoteNode.remoteOnionIDs.remove(ocr);
+                    sendPayload2 = new SinglePayload(BytesToHex.hexToBytes(ocr));
+                    toSend2 = (BroadcastPacket) new UnicastPacket(sendPayload2.getSize()).setDestinationAddress(remoteNode.ID)
+                            .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitBroken);
+                }
+                removeCircuitIDString(ocr);
+
+            }
+        } else if (onionCircuitRemoteToOnionCircuitInit.containsKey(strCID) && circuitID.length == 16) {
+            String oci = onionCircuitRemoteToOnionCircuitInit.get(strCID);
+            onionCircuitRemoteToOnionCircuitInit.remove(strCID);
+            if (oci != null && oci.length() == 32) {
+                onionCircuitInitToOnionCircuitRemote.remove(oci);
+                GraphNode remoteNode = onionCircuitRemoteToRemote.remove(strCID);
+                if (remoteNode != null) {
+                    remoteNode.remoteOnionIDs.remove(strCID);
+                    sendPayload = new SinglePayload(circuitID);
+                    toSend = (BroadcastPacket) new UnicastPacket(sendPayload.getSize()).setDestinationAddress(remoteNode.ID)
+                            .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitBroken);
+                }
+                removeCircuitID(circuitID);
+                GraphNode initNode = onionCircuitInitToInit.remove(strCID);
+                if (initNode != null) {
+                    initNode.initOnionIDs.remove(oci);
+                    onionCircuitInitToEncryptionKey.remove(oci);
+                    sendPayload2 = new SinglePayload(BytesToHex.hexToBytes(oci));
+                    toSend2 = (BroadcastPacket) new UnicastPacket(sendPayload2.getSize()).setDestinationAddress(initNode.ID)
+                            .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitBroken);
+                }
+                removeCircuitIDString(oci);
+            }
+        }
+        if (toSend != null)
+            send((BroadcastPacket) toSend.setPacketData(sendPayload).timeStamp());
+        if (toSend2 != null)
+            send((BroadcastPacket) toSend2.setPacketData(sendPayload2).timeStamp());
+    }
+
+    protected void processOnion(UnicastPacket packet) {
+        if (packet.getType() == PacketType.UnicastOnionCircuitBroken && packet.getPacketData(true) instanceof SinglePayload sp)
+            deleteCircuit(sp.getPayload());
+        //TODO: Handle the other onion circuit packet types
+        else if (packet.getPacketData(true) instanceof OnionPayload onionPayload) {
+            GraphNode csNode = onionCircuitInitToInit.get(onionPayload.getLayer().getCircuitIDString());
+            if (csNode != null && Arrays.equals(csNode.ID, packet.getSourceAddress())) {
+                byte[] initKey = onionCircuitInitToEncryptionKey.get(onionPayload.getLayer().getCircuitIDString());
+                String remote = onionCircuitInitToOnionCircuitRemote.get(onionPayload.getLayer().getCircuitIDString());
+                if (remote != null && initKey != null && remote.length() == 64) {
+                    GraphNode cdNode = network.get(remote);
+                    if (onionPayload.getLayer() instanceof DataLayer odl) {
+                        try {
+                            Packet toSend = ((DataLayer) odl.decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))).getPacket();
+                            if (toSend instanceof BroadcastPacket tsbpk && Arrays.equals(cdNode.ID, tsbpk.getSourceAddress()))
+                                route((BroadcastPacket) toSend);
+                        } catch (GeneralSecurityException ignored) {
+                        }
+                    }
+                } else if (remote != null && initKey != null) {
+                    GraphNode cdNode = onionCircuitRemoteToRemote.get(remote);
+                    try {
+                        OnionLayer nextLayer = onionPayload.getLayer().decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey)).getSubLayer();
+                        if (nextLayer != null) {
+                            OnionPayload newPayload = new OnionPayload(nextLayer);
+                            Packet toSend = new UnicastPacket(newPayload.getSize()).setDestinationAddress(cdNode.ID)
+                                    .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnion)
+                                    .setPacketData(newPayload).timeStamp();
+                            send((BroadcastPacket) toSend);
+                        }
+                    } catch (GeneralSecurityException ignored) {
+                    }
+                } else if (initKey != null) {
+                    //TODO: Handle handshake through circuit
+                    if (onionPayload.getLayer() instanceof DataLayer odl) {
+                        try {
+                            Packet toSend = ((DataLayer) odl.decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))).getPacket();
+                            //TODO: Check sender is thisNode, and register the R/NID of the payload before sending
+                        } catch (GeneralSecurityException e) {
+                        }
+                    }
+                }
+            } else {
+                csNode = onionCircuitRemoteToRemote.get(onionPayload.getLayer().getCircuitIDString());
+                if (csNode != null && Arrays.equals(csNode.ID, packet.getSourceAddress())) {
+                    String init = onionCircuitRemoteToOnionCircuitInit.get(onionPayload.getLayer().getCircuitIDString());
+                    if (init != null) {
+                        byte[] initKey = onionCircuitInitToEncryptionKey.get(init);
+                        GraphNode cdNode = onionCircuitInitToInit.get(init);
+                        if (initKey != null && cdNode != null) {
+                            try {
+                                OnionLayer nextLayer = new OnionLayer(onionPayload.getLayer()).encrypt(cryptoProvider.GetCryptorInstance()
+                                        .setKey(initKey)).setCircuitID(BytesToHex.hexToBytes(init));
+                                OnionPayload newPayload = new OnionPayload(nextLayer);
+                                Packet toSend = new UnicastPacket(newPayload.getSize()).setDestinationAddress(cdNode.ID).setSourceAddress(thisNode.ID)
+                                        .setTTL(maxTTL).setPacketType(PacketType.UnicastOnion).setPacketData(newPayload).timeStamp();
+                                send((BroadcastPacket) toSend);
+                            } catch (GeneralSecurityException e) {
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    protected void processEthereal(UnicastPacket packet) {
+        String initCID = onionCircuitRemoteToOnionCircuitInit.get(BytesToHex.bytesToHex(packet.getDestinationAddress()));
+        if (initCID != null) {
+            byte[] initKey = onionCircuitInitToEncryptionKey.get(initCID);
+            GraphNode initNode = onionCircuitInitToInit.get(initCID);
+            if (initKey != null && initNode != null) {
+                DataLayer upper = new DataLayer(packet);
+                try {
+                    upper.encrypt(cryptoProvider.GetCryptorInstance().setKey(initKey));
+                } catch (GeneralSecurityException e) {
+                    return;
+                }
+                OnionPayload payload = new OnionPayload(upper);
+                UnicastPacket packetToSend = (UnicastPacket) new UnicastPacket(payload.getSize()).setDestinationAddress(initNode.ID)
+                        .setTTL(maxTTL).setPacketType(PacketType.UnicastOnion).setPacketData(payload).timeStamp();
+                send(packetToSend);
+            }
+        }
+    }
+
+    public byte[] generateCircuitID() {
+        byte[] circuitID = new byte[16];
+        synchronized (lockOnionCircuitIDs) {
+            boolean contained = true;
+            while (contained) {
+                random.nextBytes(circuitID);
+                contained = onionCircuitIDs.contains(BytesToHex.bytesToHex(circuitID));
+            }
+            onionCircuitIDs.add(BytesToHex.bytesToHex(circuitID));
+        }
+        return circuitID;
+    }
+
+    protected boolean addCircuitID(byte[] circuitID) {
+        synchronized (lockOnionCircuitIDs) {
+            if (onionCircuitIDs.contains(BytesToHex.bytesToHex(circuitID)))
+                return false;
+            onionCircuitIDs.add(BytesToHex.bytesToHex(circuitID));
+            return true;
+        }
+    }
+
+    protected void removeCircuitIDString(String circuitIDStr) {
+        synchronized (lockOnionCircuitIDs) {
+            onionCircuitIDs.remove(circuitIDStr);
+        }
+    }
+
+    protected void removeCircuitID(byte[] circuitID) {
+        removeCircuitIDString(BytesToHex.bytesToHex(circuitID));
+    }
+
     private void hopProcessor(Map<GraphNode,NodeHopInfo> hopInfo,
                               GraphNode thisConnectedTransport, GraphNode currentNode, int currentWeight) {
         // Could have another map registry to mark visited nodes, cleared for each connected transport node
@@ -83,7 +384,7 @@ public class Router {
         synchronized (nextHopLock) {
             if (address == null) {
                 GraphNode[] nhs = new GraphNode[hopObjects.size()];
-                hopObjects.toArray(nhs);
+                nhs = hopObjects.toArray(nhs);
                 return nhs;
             } else {
                 GraphNode nh = nextHop.get(address);
@@ -98,6 +399,7 @@ public class Router {
 
     protected void resetNextHops() {
         synchronized (nextHopLock) {
+            List<GraphNode> missingNetwork = new ArrayList<>(network.values());
             nextHop.clear();
             hopObjects.clear();
             hopObjects.addAll(thisNode.siblings);
@@ -108,10 +410,15 @@ public class Router {
             }
             for (Map.Entry<GraphNode, NodeHopInfo> entry : hopInfoStore.entrySet()) {
                 nextHop.put(entry.getKey().nodeID, entry.getValue().connectedTransport);
-                for (GraphNode eNode : entry.getKey().etherealNodes)
+                missingNetwork.remove(entry.getKey());
+                for (GraphNode eNode : entry.getKey().etherealNodes) {
                     nextHop.put(eNode.nodeID, entry.getValue().connectedTransport);
+                    missingNetwork.remove(eNode);
+                }
             }
-        };
+            for (GraphNode node : missingNetwork)
+                removeNode(node);
+        }
     }
 
     private static class NodeHopInfo {
@@ -145,14 +452,15 @@ public class Router {
         }
     }
 
-    private BroadcastPacket chargePacket(BroadcastPacket toCharge) {
+    private Packet chargePacket(Packet toCharge) {
         if (toCharge == null)
             return null;
         PacketStore store;
         byte[] pkHash;
         String pkHashStr;
         SignaturePayload signaturePayload = null;
-        if ((toCharge.getType() == PacketType.BroadcastSignature || toCharge.getType() == PacketType.UnicastSignature)
+        if ((toCharge.getType() == PacketType.BroadcastSignature || toCharge.getType() == PacketType.UnicastSignature
+        || toCharge.getType() == PacketType.DirectSignature)
                 && toCharge.getPacketData(true) instanceof SignaturePayload sigp) {
             pkHash = sigp.getDataHash().readAllBytes();
             pkHashStr = sigp.getDataHashString();
@@ -240,7 +548,7 @@ public class Router {
                     packetStore.remove(pkHashStr);
                 }
             }
-            return (BroadcastPacket) toret;
+            return toret;
         }
     }
 
@@ -303,7 +611,11 @@ public class Router {
     }
 
     public void receive(BroadcastPacket packet) {
-        packet = chargePacket(packet);
+        if (packet instanceof UnicastPacket upk && !Arrays.equals(upk.getDestinationAddress(), thisNode.ID)) {
+            receiveQueue.add(packet);
+            return;
+        }
+        packet = (BroadcastPacket) chargePacket(packet);
         if (packet != null) {
             GraphNode sour = network.get(BytesToHex.bytesToHex(packet.getSourceAddress()));
             if (packet.isEncrypted() && e2eEnabled) {
@@ -374,15 +686,28 @@ public class Router {
 
         @Override
         public void run() {
-            while(dataLink.isActive()) {
+            while(active && dataLink.isActive()) {
                 byte[] data = dataLink.receive();
                 if (data == null)
                     return;
                 Packet pk = Packet.getPacketFromBytes(data);
-                if (pk.getType() == PacketType.Unknown || !pk.verifyHash(cryptoProvider.GetHasherInstance()))
+                if (pk.getType() == PacketType.Unknown || !pk.timeStampInRange() || !pk.verifyHash(cryptoProvider.GetHasherInstance()))
                     continue;
                 pk.decrementTTL();
-                processPacket(pk);
+                if (pk.getType().getMessagingType() == PacketMessagingType.Direct) {
+                    Packet pkc = chargePacket(pk);
+                    if (pkc != null) {
+                        if (pkc.getType() == PacketType.DirectGatewayAvailable) {
+                            linkedNode.isGateway = true;
+                            gateways.add(linkedNode);
+                        } else if (pkc.getType() == PacketType.DirectGraphing || pkc.getType() == PacketType.DirectNodesEID) {
+                            pk = new BroadcastPacket(pkc.getPayloadSize()).setSourceAddress(linkedNode.ID)
+                                    .setPacketData(pkc.getPacketData(true)).setPacketType(pkc.getType());
+                            receiveQueue.add(pk);
+                        }
+                    }
+                } else
+                    processPacket(pk);
             }
         }
     }

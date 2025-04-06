@@ -3,7 +3,9 @@ package com.captainalm.lib.mesh.routing.graphing;
 import com.captainalm.lib.mesh.transport.INetTransport;
 import com.captainalm.lib.mesh.utils.BytesToHex;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -27,6 +29,8 @@ public final class GraphNode {
     private String ipv4Str;
     private String ipv6Str;
     public INetTransport transport;
+    public final List<String> remoteOnionIDs = new ArrayList<>();
+    public final List<String> initOnionIDs = new ArrayList<>();
 
     /**
      * Constructs a new GraphNode.

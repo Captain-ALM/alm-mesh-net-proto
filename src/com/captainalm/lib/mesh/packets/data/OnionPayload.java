@@ -4,6 +4,9 @@ import com.captainalm.lib.mesh.packets.Packet;
 import com.captainalm.lib.mesh.packets.PacketType;
 import com.captainalm.lib.mesh.packets.layer.DataLayer;
 import com.captainalm.lib.mesh.packets.layer.OnionLayer;
+import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
+
+import java.io.IOException;
 
 /**
  * Encapsulates an {@link OnionLayer}.
@@ -22,6 +25,11 @@ public class OnionPayload extends PacketData {
     public OnionPayload(OnionLayer layer) {
         super(layer.getSize());
         this.layer = layer;
+        ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(data, 0, dataSize);
+        try {
+            layer.getData().transferTo(ovrw);
+        } catch (IOException e) {
+        }
     }
 
     /**

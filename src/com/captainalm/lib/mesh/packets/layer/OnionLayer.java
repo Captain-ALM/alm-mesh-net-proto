@@ -191,4 +191,13 @@ public class OnionLayer {
     public OnionLayer getParent() {
         return parent;
     }
+
+    /**
+     * Gets the layer data stream.
+     *
+     * @return The layer byte data as a stream.
+     */
+    public ByteArrayInputStream getData() {
+        return new ByteArrayInputStream(data, dataStartIndex, dataSize);
+    }
 }

@@ -8,6 +8,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Provides the ability to send a list of gateways.
@@ -62,5 +63,29 @@ public class GatewayPayload extends PacketData {
             }
         }
         return gateways;
+    }
+
+    /**
+     * Gets the gateways, adding / updating a network map if applicable and gateway list.
+     *
+     * @param network The network of graph nodes.
+     * @param gateways The list of gateways.
+     * @param addressToGraphNode The network nodes to addresses.
+     */
+    public void getGateways(Map<String, GraphNode> network , List<GraphNode> gateways, Map<String, GraphNode> addressToGraphNode) {
+        if (getGateways() != null && network != null && gateways != null) {
+            for (String gatewayID : getGateways()) {
+                GraphNode gateway = network.get(gatewayID);
+                if (gateway == null) {
+                    gateway = new GraphNode(BytesToHex.hexToBytes(gatewayID));
+                    gateway.isGateway = true;
+                    network.put(gatewayID, gateway);
+                    addressToGraphNode.put(gateway.getIPv4AddressString(), gateway);
+                    addressToGraphNode.put(gateway.getIPv6AddressString(), gateway);
+                }
+                if (!gateways.contains(gateway))
+                    gateways.add(gateway);
+            }
+        }
     }
 }

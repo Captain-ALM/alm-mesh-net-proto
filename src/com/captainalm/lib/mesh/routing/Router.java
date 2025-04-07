@@ -39,6 +39,8 @@ public class Router {
     private final List<GraphNode> hopObjects = new ArrayList<>();
     private final Object nextHopLock = new Object();
     private final Map<String, GraphNode> nextHop = new HashMap<>(); // ID to next hop
+    private final byte[] kemPrivateKey;
+    private final byte[] dsaPrivateKey;
 
     protected final Map<String, DataLinkProcessor> dataLinks = new ConcurrentHashMap<>(); //ID to data links;
     protected final BlockingQueue<Packet> receiveQueue = new LinkedBlockingQueue<>();
@@ -67,10 +69,13 @@ public class Router {
 
     protected final Map<String,GraphNode> onionCircuitRemoteToRemote = new HashMap<>(); //Remote OCID to Remote Node
 
-    protected final List<String> onionCircuitIDs = new ArrayList<>(); // List of all registered onion circuit IDs
     protected final Map<String, String> nIDtoOnionCircuitID = new HashMap<>(); // N ID to Onion circuit ID
     protected final Map<String,GraphNode> etherealNodeToOwner = new HashMap<>();
+
     private final Object lockOnionCircuitIDs = new Object();
+    protected final List<String> onionCircuitIDs = new ArrayList<>(); // List of all registered onion circuit IDs
+    private final Object locknIDs = new Object();
+    protected final List<String> nIDs = new ArrayList<>();
 
     protected void protectedReceive(Packet packet) {
         PacketType pt = packet.getType();
@@ -81,7 +86,41 @@ public class Router {
                 processEthereal(upk);
             else {
                 try {
-                    if (pt == PacketType.UnicastOnionCircuitCreated && packet.getPacketData(true) instanceof CircuitCreatedPayload ocp
+                    if (pt == PacketType.UnicastEncryptionRequestHandshake && packet.getPacketData(true) instanceof SinglePayload sp) {
+                        GraphNode erNode = network.get(BytesToHex.bytesToHex(upk.getSourceAddress()));
+                        if (erNode != null) {
+                            try {
+                                byte[] dKey = cryptoProvider.GetUnwrapperInstance().setPrivateKey(kemPrivateKey).unwrap(sp.getPayload());
+                                if (dKey != null) {
+                                    erNode.setEncryptionKey(dKey, packet.getTimeStamp());
+                                    SinglePayload spts = new SinglePayload(cryptoProvider.GetCryptorInstance().setKey(erNode.getEncryptionKey())
+                                            .encrypt(erNode.getEncryptionKey()));
+                                    send((BroadcastPacket) new UnicastPacket(spts.getSize()).setDestinationAddress(upk.getSourceAddress())
+                                            .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastEncryptionResponseHandshake)
+                                            .setPacketData(spts).timeStamp());
+                                } else
+                                    throw new GeneralSecurityException();
+                            } catch (GeneralSecurityException ignored) {
+                                send((BroadcastPacket) new UnicastPacket(0).setDestinationAddress(upk.getSourceAddress())
+                                        .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastEncryptionRejectedHandshake)
+                                        .timeStamp());
+                            }
+                        }
+                    } else if (pt == PacketType.UnicastEncryptionResponseHandshake && packet.getPacketData(true) instanceof SinglePayload sp) {
+                        GraphNode erNode = network.get(BytesToHex.bytesToHex(upk.getSourceAddress()));
+                        if (erNode != null) {
+                            try {
+                                byte[] dKey = cryptoProvider.GetCryptorInstance().setKey(erNode.getEncryptionKey()).decrypt(sp.getPayload());
+                                if (dKey != null)
+                                    erNode.setEncryptionKey(dKey, packet.getTimeStamp());
+                            } catch (GeneralSecurityException ignored) {
+                            }
+                        }
+                    } else if (pt == PacketType.UnicastEncryptionRejectedHandshake) {
+                        GraphNode erNode = network.get(BytesToHex.bytesToHex(upk.getSourceAddress()));
+                        if (erNode != null)
+                            erNode.stopEncryptionRequests = true;
+                    } else if (pt == PacketType.UnicastOnionCircuitCreated && packet.getPacketData(true) instanceof CircuitCreatedPayload ocp
                     && !nIDtoOnionCircuitID.containsKey(BytesToHex.bytesToHexFromStreamWithSize(ocp.getNonceStream(), 16)))
                         pkProcessor.processPacket(packet);
                     else if (pt == PacketType.UnicastOnionCircuitRejected && packet.getPacketData(true) instanceof SinglePayload sp
@@ -104,6 +143,9 @@ public class Router {
     }
 
     protected void processBroadcast(Packet packet) {
+        if (packet instanceof BroadcastPacket bpk)
+            for (GraphNode eNode : thisNode.etherealNodes)
+                processEtherealNode(bpk, eNode);
         PacketData payload = packet.getPacketData(true);
         if (payload instanceof AssociatedPayload adp) {
             switch (packet.getType()) {
@@ -243,15 +285,95 @@ public class Router {
         if (packet.getType() == PacketType.UnicastOnionCircuitBroken && packet.getPacketData(true) instanceof SinglePayload sp)
             deleteCircuit(sp.getPayload());
         else if (packet.getType() == PacketType.UnicastOnionCircuitCreated && packet.getPacketData(true) instanceof  CircuitCreatedPayload crtdp) {
-
+            byte[] nid = crtdp.getNonceStream().readAllBytes();
+            String oCID = nIDtoOnionCircuitID.remove(BytesToHex.bytesToHex(nid));
+            if (oCID != null) {
+                removeNID(nid);
+                byte[] initKey = onionCircuitInitToEncryptionKey.get(oCID);
+                GraphNode initNode = onionCircuitInitToInit.get(oCID);
+                if (initKey != null && initNode != null) {
+                    if (addCircuitID(crtdp.getCircuitID())) {
+                        try {
+                            OnionPayload ocpy = new OnionPayload(new DataLayer(packet).encrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))
+                                    .setCircuitID(BytesToHex.hexToBytes(oCID)));
+                            send((BroadcastPacket) new UnicastPacket(ocpy.getSize()).setDestinationAddress(initNode.ID).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                                    .setPacketType(PacketType.UnicastOnion).setPacketData(ocpy).timeStamp());
+                        } catch (GeneralSecurityException ignored) {
+                        }
+                    } else {
+                        SinglePayload cpy = new SinglePayload(nid);
+                        Packet toSendE = new UnicastPacket(cpy.getSize()).setDestinationAddress(thisNode.ID)
+                                .setSourceAddress(packet.getSourceAddress()).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitRejected)
+                                .setPacketData(cpy).timeStamp();
+                        try {
+                            OnionPayload ocpy = new OnionPayload(new DataLayer(toSendE).encrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))
+                                    .setCircuitID(BytesToHex.hexToBytes(oCID)));
+                            send((BroadcastPacket) new UnicastPacket(ocpy.getSize()).setDestinationAddress(initNode.ID).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                                    .setPacketType(PacketType.UnicastOnion).setPacketData(ocpy).timeStamp());
+                        } catch (GeneralSecurityException ignored) {
+                        }
+                        cpy = new SinglePayload(crtdp.getCircuitID());
+                        send((BroadcastPacket) new UnicastPacket(cpy.getSize()).setDestinationAddress(packet.getSourceAddress()).setSourceAddress(thisNode.ID)
+                                .setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitBroken).setPacketData(cpy).timeStamp());
+                    }
+                }
+            }
         } else if (packet.getType() == PacketType.UnicastOnionCircuitRejected && packet.getPacketData(true) instanceof SinglePayload sp) {
-
-        } else if (packet.getType() == PacketType.UnicastOnionCircuitCreate && packet.getPacketData(true) instanceof  CircuitCreatePayload ccpl) {
-
-        } else if (packet.getType() == PacketType.UnicastOnionCircuitCreateEndpoint && packet.getPacketData(true) instanceof CircuitCreateEndpointPayload ccep) {
-
+            String oCID = nIDtoOnionCircuitID.remove(BytesToHex.bytesToHex(sp.getPayload()));
+            if (oCID != null) {
+                removeNID(sp.getPayload());
+                byte[] initKey = onionCircuitInitToEncryptionKey.get(oCID);
+                GraphNode initNode = onionCircuitInitToInit.get(oCID);
+                if (initKey != null && initNode != null) {
+                    try {
+                        OnionPayload ocpy = new OnionPayload(new DataLayer(packet).encrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))
+                                .setCircuitID(BytesToHex.hexToBytes(oCID)));
+                        send((BroadcastPacket) new UnicastPacket(ocpy.getSize()).setDestinationAddress(initNode.ID).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                                .setPacketType(PacketType.UnicastOnion).setPacketData(ocpy).timeStamp());
+                    } catch (GeneralSecurityException ignored) {
+                    }
+                }
+            }
+        } else if ((packet.getType() == PacketType.UnicastOnionCircuitCreate
+        || packet.getType() == PacketType.UnicastOnionCircuitCreateEndpoint) && packet.getPacketData(true) instanceof CircuitCreatePayload ccpl
+        && ccpl.getWrappedKey() != null) {
+            byte[] ocid = generateCircuitID();
+            boolean reject = false;
+            GraphNode eReg = null;
+            try {
+                byte[] ocKey = cryptoProvider.GetUnwrapperInstance().setPrivateKey(kemPrivateKey).unwrap(ccpl.getWrappedKey());
+                onionCircuitInitToInit.put(BytesToHex.bytesToHex(ocid), network.get(BytesToHex.bytesToHex(packet.getSourceAddress())));
+                onionCircuitInitToEncryptionKey.put(BytesToHex.bytesToHex(ocid), ocKey);
+                if (packet.getType() == PacketType.UnicastOnionCircuitCreateEndpoint
+                        && packet.getPacketData(true) instanceof CircuitCreateEndpointPayload ccepl) {
+                    if (ccepl.getEtherealNodeID() != null) {
+                        onionCircuitInitToOnionCircuitRemote.put(BytesToHex.bytesToHex(ocid), BytesToHex.bytesToHex(ccepl.getEtherealNodeID()));
+                        eReg = new GraphNode(ccepl.getEtherealNodeID());
+                        registerEtherealNode(eReg, thisNode);
+                    } else {
+                        removeCircuitID(ocid);
+                        reject = true;
+                    }
+                }
+                if (!reject) {
+                    CircuitCreatedPayload ccdpl = new CircuitCreatedPayload(ccpl.getNonceStream(), ocid, cryptoProvider.GetCryptorInstance().setKey(ocKey).encrypt(ocKey));
+                    send((BroadcastPacket) new UnicastPacket(ccdpl.getSize()).setDestinationAddress(packet.getSourceAddress())
+                            .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitCreated)
+                            .setPacketData(ccdpl).timeStamp());
+                }
+            } catch (GeneralSecurityException e) {
+                removeCircuitID(ocid);
+                reject = true;
+                if (eReg != null)
+                    removeNode(eReg);
+            }
+            if (reject) {
+                SinglePayload rccpl = new SinglePayload(ccpl.getNonceStream().readAllBytes());
+                send((BroadcastPacket) new UnicastPacket(rccpl.getSize()).setDestinationAddress(packet.getSourceAddress())
+                        .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitRejected)
+                        .setPacketData(rccpl).timeStamp());
+            }
         }
-        //TODO: Handle the other onion circuit packet types
         else if (packet.getPacketData(true) instanceof OnionPayload onionPayload) {
             GraphNode csNode = onionCircuitInitToInit.get(onionPayload.getLayer().getCircuitIDString());
             if (csNode != null && Arrays.equals(csNode.ID, packet.getSourceAddress())) {
@@ -263,7 +385,10 @@ public class Router {
                         try {
                             Packet toSend = ((DataLayer) odl.decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))).getPacket();
                             if (toSend instanceof BroadcastPacket tsbpk && Arrays.equals(cdNode.ID, tsbpk.getSourceAddress()))
-                                route((BroadcastPacket) toSend);
+                                if (toSend.getType().getMessagingType() == PacketMessagingType.Broadcast)
+                                    receive((BroadcastPacket) toSend);
+                                else
+                                    route((BroadcastPacket) toSend);
                         } catch (GeneralSecurityException ignored) {
                         }
                     }
@@ -288,8 +413,20 @@ public class Router {
                                     upkts.getType() == PacketType.UnicastOnionCircuitCreateEndpoint) &&
                                     toSend.getPacketData(true) instanceof CircuitCreatePayload ccp &&
                             Arrays.equals(upkts.getSourceAddress(),thisNode.ID)) {
-                                nIDtoOnionCircuitID.put(BytesToHex.bytesToHex(ccp.getNonceStream().readAllBytes()), onionPayload.getLayer().getCircuitIDString());
-                                send((BroadcastPacket) toSend);
+                                byte[] cnid = ccp.getNonceStream().readAllBytes();
+                                if (addNID(cnid)) {
+                                    nIDtoOnionCircuitID.put(BytesToHex.bytesToHex(cnid), onionPayload.getLayer().getCircuitIDString());
+                                } else {
+                                    SinglePayload cpy = new SinglePayload(cnid);
+                                    Packet toSendE = new UnicastPacket(cpy.getSize()).setDestinationAddress(thisNode.ID)
+                                            .setSourceAddress(upkts.getDestinationAddress()).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitRejected)
+                                            .setPacketData(cpy).timeStamp();
+                                    OnionPayload ocpy = new OnionPayload(new DataLayer(toSendE).encrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))
+                                            .setCircuitID(onionPayload.getLayer().getCircuitID()));
+                                    toSend = new UnicastPacket(ocpy.getSize()).setDestinationAddress(csNode.ID).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                                            .setPacketType(PacketType.UnicastOnion).setPacketData(ocpy);
+                                }
+                                send((BroadcastPacket) toSend.timeStamp());
                             }
                         } catch (GeneralSecurityException ignored) {
                         }
@@ -319,8 +456,8 @@ public class Router {
         }
     }
 
-    protected void processEthereal(UnicastPacket packet) {
-        String initCID = onionCircuitRemoteToOnionCircuitInit.get(BytesToHex.bytesToHex(packet.getDestinationAddress()));
+    protected void processEtherealNode(BroadcastPacket packet, GraphNode eNode) {
+        String initCID = onionCircuitRemoteToOnionCircuitInit.get(eNode.nodeID);
         if (initCID != null) {
             byte[] initKey = onionCircuitInitToEncryptionKey.get(initCID);
             GraphNode initNode = onionCircuitInitToInit.get(initCID);
@@ -331,7 +468,7 @@ public class Router {
                 } catch (GeneralSecurityException e) {
                     return;
                 }
-                OnionPayload payload = new OnionPayload(upper);
+                OnionPayload payload = new OnionPayload(upper.setCircuitID(BytesToHex.hexToBytes(initCID)));
                 UnicastPacket packetToSend = (UnicastPacket) new UnicastPacket(payload.getSize()).setDestinationAddress(initNode.ID)
                         .setTTL(maxTTL).setPacketType(PacketType.UnicastOnion).setPacketData(payload).timeStamp();
                 send(packetToSend);
@@ -339,7 +476,16 @@ public class Router {
         }
     }
 
-    public byte[] generateCircuitID() {
+    protected void processEthereal(UnicastPacket packet) {
+        String initCID = onionCircuitRemoteToOnionCircuitInit.get(BytesToHex.bytesToHex(packet.getDestinationAddress()));
+        if (initCID != null) {
+            GraphNode initNode = onionCircuitInitToInit.get(initCID);
+            if (initNode != null)
+                processEtherealNode(packet, initNode);
+        }
+    }
+
+    protected byte[] generateCircuitID() {
         byte[] circuitID = new byte[16];
         synchronized (lockOnionCircuitIDs) {
             boolean contained = true;
@@ -352,7 +498,7 @@ public class Router {
         return circuitID;
     }
 
-    protected boolean addCircuitID(byte[] circuitID) {
+    public boolean addCircuitID(byte[] circuitID) {
         synchronized (lockOnionCircuitIDs) {
             if (onionCircuitIDs.contains(BytesToHex.bytesToHex(circuitID)))
                 return false;
@@ -369,6 +515,38 @@ public class Router {
 
     protected void removeCircuitID(byte[] circuitID) {
         removeCircuitIDString(BytesToHex.bytesToHex(circuitID));
+    }
+
+    public byte[] generateNID() {
+        byte[] NID = new byte[16];
+        synchronized (locknIDs) {
+            boolean contained = true;
+            while (contained) {
+                random.nextBytes(NID);
+                contained = nIDs.contains(BytesToHex.bytesToHex(NID));
+            }
+            nIDs.add(BytesToHex.bytesToHex(NID));
+        }
+        return NID;
+    }
+
+    protected boolean addNID(byte[] NID) {
+        synchronized (locknIDs) {
+            if (nIDs.contains(BytesToHex.bytesToHex(NID)))
+                return false;
+            nIDs.add(BytesToHex.bytesToHex(NID));
+            return true;
+        }
+    }
+
+    protected void removeNIDString(String NIDStr) {
+        synchronized (locknIDs) {
+            nIDs.remove(NIDStr);
+        }
+    }
+
+    protected void removeNID(byte[] NID) {
+        removeNIDString(BytesToHex.bytesToHex(NID));
     }
 
     private void hopProcessor(Map<GraphNode,NodeHopInfo> hopInfo,
@@ -396,6 +574,8 @@ public class Router {
 
     protected GraphNode[] getNextHops(String address) {
         synchronized (nextHopLock) {
+            if (ownsAddress(BytesToHex.hexToBytes(address)))
+                return null;
             if (address == null) {
                 GraphNode[] nhs = new GraphNode[hopObjects.size()];
                 nhs = hopObjects.toArray(nhs);
@@ -574,6 +754,10 @@ public class Router {
             dests = getNextHops(BytesToHex.bytesToHex(upk.getDestinationAddress()));
         else
             dests = getNextHops(null);
+        if (dests == null) {
+            processPacket(packet);
+            return;
+        }
         for (GraphNode node : dests) {
             if (node.transport != null)
                 node.transport.send(packet.getPacketBytes());
@@ -581,7 +765,6 @@ public class Router {
     }
 
     public void send(BroadcastPacket packet) {
-        //TODO: Handle send and route for the destination being this node, or an ethereal owned by this node
         byte[] key = null;
         PacketType pt = packet.getType();
         if (pt != PacketType.UnicastSignature && pt != PacketType.UnicastEncryptionRejectedHandshake &&
@@ -589,12 +772,13 @@ public class Router {
                 pt != PacketType.UnicastEncryptionResponseHandshake &&
                 pt != PacketType.UnicastOnionCircuitCreate && pt != PacketType.UnicastOnionCircuitBroken &&
                 pt != PacketType.UnicastOnionCircuitCreateEndpoint && pt != PacketType.UnicastOnionCircuitCreated &&
-                pt != PacketType.UnicastOnionCircuitRejected) { // Packet type not a handshake (Handshake encryption not allowed)
+                pt != PacketType.UnicastOnionCircuitRejected
+        && !Arrays.equals(packet.getSourceAddress(), thisNode.ID)) { // Packet type not a handshake (Handshake encryption not allowed) or source from thisNode
             if (packet instanceof UnicastPacket upk) {
                 GraphNode dest = network.get(BytesToHex.bytesToHex(upk.getDestinationAddress()));
                 if (dest != null) {
                     key = dest.getEncryptionKey();
-                    if (key == null && e2eEnabled && requireE2E)
+                    if (key == null && e2eEnabled && requireE2E && !dest.stopEncryptionRequests)
                         key = sendEncryptionHandshake(dest);
                 }
             }
@@ -603,7 +787,7 @@ public class Router {
             if (key != null)
                 packet.Encrypt(cryptoProvider.GetCryptorInstance().setKey(key));
             packet.calculateHash(cryptoProvider.GetHasherInstance());
-            Packet[] sigp = packet.getSignaturePackets(cryptoProvider.GetHasherInstance(), cryptoProvider.GetSignerInstance().setPrivateKey(thisNode.dsaKey), 1210);
+            Packet[] sigp = packet.getSignaturePackets(cryptoProvider.GetHasherInstance(), cryptoProvider.GetSignerInstance().setPrivateKey(dsaPrivateKey), 1210);
             for (Packet p : sigp) {
                 p.calculateHash(cryptoProvider.GetHasherInstance());
                 route((BroadcastPacket) p);
@@ -620,7 +804,8 @@ public class Router {
             SinglePayload enchp = new SinglePayload(cryptoProvider.GetWrapperInstance().setPublicKey(target.kemKey).wrap(key));
             target.setEncryptionKey(key, Instant.now().getEpochSecond());
             send((BroadcastPacket) new UnicastPacket(enchp.getSize()).setDestinationAddress(target.ID)
-                    .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastEncryptionRequestHandshake).setPacketData(enchp));
+                    .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastEncryptionRequestHandshake).setPacketData(enchp)
+                    .timeStamp());
             return key;
         } catch (GeneralSecurityException e) {
             return null;
@@ -630,7 +815,7 @@ public class Router {
     public void receive(BroadcastPacket packet) {
         if (packet instanceof UnicastPacket upk && !Arrays.equals(upk.getDestinationAddress(), thisNode.ID)) {
             receiveQueue.add(packet);
-            return;
+            return; //Code to process handshake translated extra packets
         }
         packet = (BroadcastPacket) chargePacket(packet);
         if (packet != null) {
@@ -646,7 +831,8 @@ public class Router {
                         }
                     }
                 }
-            } else if (e2eEnabled && requireE2E) {
+            } else if (e2eEnabled && requireE2E && !Arrays.equals(packet.getSourceAddress(), thisNode.ID)
+            && packet instanceof UnicastPacket && !sour.stopEncryptionRequests) {
                 sendEncryptionHandshake(sour);
                 if (ignoreNonE2E)
                     return;
@@ -682,7 +868,7 @@ public class Router {
     }
 
     protected boolean addressAvailable(String address) {
-        return getNextHops(address).length > 0;
+        return ownsAddress(BytesToHex.hexToBytes(address)) || getNextHops(address).length > 0;
     }
 
     /**

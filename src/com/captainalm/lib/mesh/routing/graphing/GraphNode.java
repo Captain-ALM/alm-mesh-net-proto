@@ -31,6 +31,7 @@ public final class GraphNode {
     public INetTransport transport;
     public final List<String> remoteOnionIDs = new ArrayList<>();
     public final List<String> initOnionIDs = new ArrayList<>();
+    public boolean stopEncryptionRequests = false;
 
     /**
      * Constructs a new GraphNode.

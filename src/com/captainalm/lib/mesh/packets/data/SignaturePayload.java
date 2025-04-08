@@ -18,6 +18,7 @@ import java.util.Arrays;
  * {@link com.captainalm.lib.mesh.packets.PacketType#DirectHandshakeDSARecommendationSignature}
  * {@link com.captainalm.lib.mesh.packets.PacketType#BroadcastSignature}
  * {@link com.captainalm.lib.mesh.packets.PacketType#UnicastSignature}
+ * {@link com.captainalm.lib.mesh.packets.PacketType#DirectHandshakeSignature}
  *
  * @author Alfred Manville
  */

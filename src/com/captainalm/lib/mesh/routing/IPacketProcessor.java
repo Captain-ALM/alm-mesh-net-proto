@@ -21,4 +21,9 @@ public interface IPacketProcessor {
      * @param router Gives the router instance to the processor.
      */
     void obtainRouter(Router router);
+
+    /**
+     * Terminates the processor.
+     */
+    void terminate();
 }

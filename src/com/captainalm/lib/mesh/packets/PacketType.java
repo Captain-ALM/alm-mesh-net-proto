@@ -38,7 +38,9 @@ public enum PacketType {
     UnicastOnionCircuitCreated(28),
     UnicastOnionCircuitRejected(29),
     UnicastOnionCircuitBroken(30),
-    UnicastSignature(31);
+    UnicastSignature(31),
+    DirectHandshakeSignature(32),
+    DirectHandshakeNoRecommendation(33);
     private final byte id;
 
     PacketType(int id) {
@@ -135,6 +137,10 @@ public enum PacketType {
                 return UnicastOnionCircuitBroken;
             case 31:
                 return UnicastSignature;
+            case 32:
+                return DirectHandshakeSignature;
+            case 33:
+                return DirectHandshakeNoRecommendation;
         }
         return Unknown;
     }
@@ -145,7 +151,7 @@ public enum PacketType {
      * @return The messaging type.
      */
     public PacketMessagingType getMessagingType() {
-        if (id >= 0 && id < 12) {
+        if (id >= 0 && id < 12 || id == 32 || id == 33) {
             return PacketMessagingType.Direct;
         } else if (id > 11 && id < 20) {
             return PacketMessagingType.Broadcast;

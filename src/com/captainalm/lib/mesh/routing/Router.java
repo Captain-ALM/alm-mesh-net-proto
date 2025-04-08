@@ -1,6 +1,8 @@
 package com.captainalm.lib.mesh.routing;
 
+import com.captainalm.lib.mesh.crypto.ICryptor;
 import com.captainalm.lib.mesh.crypto.IProvider;
+import com.captainalm.lib.mesh.handshake.HandshakeProcessor;
 import com.captainalm.lib.mesh.packets.*;
 import com.captainalm.lib.mesh.packets.data.*;
 import com.captainalm.lib.mesh.packets.layer.DataLayer;
@@ -76,6 +78,72 @@ public class Router {
     protected final List<String> onionCircuitIDs = new ArrayList<>(); // List of all registered onion circuit IDs
     private final Object locknIDs = new Object();
     protected final List<String> nIDs = new ArrayList<>();
+
+    /**
+     * Constructs a new router with the specified node information, private keys, cryptographic provider and packet processor.
+     *
+     * @param local The local node information.
+     * @param privateKEMKey The private ML-KEM key for this node.
+     * @param privateDSAKey The private ML-DSA key for this node.
+     * @param cryptographicProvider The cryptographic provider.
+     * @param packetProcessor The {@link IPacketProcessor} for this router.
+     */
+    public Router(GraphNode local, byte[] privateKEMKey, byte[] privateDSAKey, IProvider cryptographicProvider, IPacketProcessor packetProcessor) {
+        if (local == null || privateKEMKey == null || privateDSAKey == null || cryptographicProvider == null || packetProcessor == null)
+            throw new IllegalArgumentException("parameter cannot be null");
+        thisNode = local;
+        kemPrivateKey = privateKEMKey;
+        dsaPrivateKey = privateDSAKey;
+        cryptoProvider = cryptographicProvider;
+        pkProcessor = packetProcessor;
+        network.put(local.nodeID, local);
+        networkAddresses.put(local.getIPv4AddressString(), local);
+        networkAddresses.put(local.getIPv6AddressString(), local);
+    }
+
+    /**
+     * Adds a handshaked transport to this router.
+     *
+     * @param transport The transport to add.
+     * @param extraPackets The extra packets from {@link HandshakeProcessor#getOtherPackets()}.
+     */
+    public void addTransport(GraphNode node, INetTransport transport, List<Packet> extraPackets) {
+        if (node == null || transport == null || extraPackets == null)
+            return;
+        GraphNode existing = network.get(node.nodeID);
+        if (existing == null) {
+            existing = node;
+            network.put(node.nodeID, existing);
+            networkAddresses.put(node.getIPv4AddressString(), node);
+            networkAddresses.put(node.getIPv6AddressString(), node);
+            resetNextHops();
+        } else
+            existing.combine(node);
+        dataLinks.put(existing.nodeID, new DataLinkProcessor(transport, existing).start());
+    }
+
+    /**
+     * Checks if the router is active.
+     *
+     * @return If the router is active.
+     */
+    public boolean isActive() {
+        return active;
+    }
+
+    /**
+     * Deactivate the router.
+     *
+     * @param shutdownTransports If the attached transports should be closed.
+     */
+    public void deactivate(boolean shutdownTransports) {
+        active = false;
+        pkProcessor.terminate();
+        if (shutdownTransports) {
+            for (DataLinkProcessor processor : dataLinks.values())
+                processor.dataLink.close();
+        }
+    }
 
     protected void protectedReceive(Packet packet) {
         PacketType pt = packet.getType();
@@ -304,7 +372,7 @@ public class Router {
                         SinglePayload cpy = new SinglePayload(nid);
                         Packet toSendE = new UnicastPacket(cpy.getSize()).setDestinationAddress(thisNode.ID)
                                 .setSourceAddress(packet.getSourceAddress()).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitRejected)
-                                .setPacketData(cpy).timeStamp();
+                                .setPacketData(cpy).timeStamp().calculateHash(cryptoProvider.GetHasherInstance());
                         try {
                             OnionPayload ocpy = new OnionPayload(new DataLayer(toSendE).encrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))
                                     .setCircuitID(BytesToHex.hexToBytes(oCID)));
@@ -420,7 +488,7 @@ public class Router {
                                     SinglePayload cpy = new SinglePayload(cnid);
                                     Packet toSendE = new UnicastPacket(cpy.getSize()).setDestinationAddress(thisNode.ID)
                                             .setSourceAddress(upkts.getDestinationAddress()).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitRejected)
-                                            .setPacketData(cpy).timeStamp();
+                                            .setPacketData(cpy).timeStamp().calculateHash(cryptoProvider.GetHasherInstance());
                                     OnionPayload ocpy = new OnionPayload(new DataLayer(toSendE).encrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))
                                             .setCircuitID(onionPayload.getLayer().getCircuitID()));
                                     toSend = new UnicastPacket(ocpy.getSize()).setDestinationAddress(csNode.ID).setSourceAddress(thisNode.ID).setTTL(maxTTL)
@@ -887,6 +955,12 @@ public class Router {
             linkedNode.transport = dataLink;
         }
 
+        public DataLinkProcessor start() {
+            recvThread.setDaemon(true);
+            recvThread.start();
+            return this;
+        }
+
         @Override
         public void run() {
             while(active && dataLink.isActive()) {
@@ -912,6 +986,9 @@ public class Router {
                 } else
                     processPacket(pk);
             }
+            if (dataLink.isActive())
+                dataLink.close();
+            dataLinks.remove(linkedNode.nodeID);
         }
     }
 }

@@ -82,4 +82,13 @@ public final class NetTransportProcessor implements IPacketProcessor {
         this.router = router;
         recvThread.start();
     }
+
+    /**
+     * Terminates the processor.
+     */
+    @Override
+    public void terminate() {
+       if(transport.isActive())
+           transport.close();
+    }
 }

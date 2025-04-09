@@ -497,10 +497,7 @@ public class Router {
                         try {
                             Packet toSend = ((DataLayer) odl.decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))).getPacket();
                             if (toSend instanceof BroadcastPacket tsbpk && Arrays.equals(cdNode.ID, tsbpk.getSourceAddress()))
-                                if (toSend.getType().getMessagingType() == PacketMessagingType.Broadcast)
-                                    receive((BroadcastPacket) toSend);
-                                else
-                                    route((BroadcastPacket) toSend);
+                                route((BroadcastPacket) toSend);
                         } catch (GeneralSecurityException ignored) {
                         }
                     }

@@ -87,8 +87,15 @@ public class Router {
      * @param privateDSAKey The private ML-DSA key for this node.
      * @param cryptographicProvider The cryptographic provider.
      * @param packetProcessor The {@link IPacketProcessor} for this router.
+     * @param packetChargeCount The number of packets to cache (Minimum 4).
+     * @param maxTTL The maximum TTL of the packets from 1-254.
+     * @param e2eEnabled Enable end to end encryption.
+     * @param requireE2E Require end to end encryption.
+     * @param ignoreNonE2E Ignore non E2E received packets.
+     * @throws IllegalArgumentException Objects passed are null or inconsistent with limits.
      */
-    public Router(GraphNode local, byte[] privateKEMKey, byte[] privateDSAKey, IProvider cryptographicProvider, IPacketProcessor packetProcessor) {
+    public Router(GraphNode local, byte[] privateKEMKey, byte[] privateDSAKey, IProvider cryptographicProvider, IPacketProcessor packetProcessor,
+                  long packetChargeCount, byte maxTTL, boolean e2eEnabled, boolean requireE2E, boolean ignoreNonE2E) {
         if (local == null || privateKEMKey == null || privateDSAKey == null || cryptographicProvider == null || packetProcessor == null)
             throw new IllegalArgumentException("parameter cannot be null");
         thisNode = local;
@@ -99,6 +106,27 @@ public class Router {
         network.put(local.nodeID, local);
         networkAddresses.put(local.getIPv4AddressString(), local);
         networkAddresses.put(local.getIPv6AddressString(), local);
+        if (maxTTL == (byte) 255 || maxTTL == 0)
+            throw new IllegalArgumentException("maxTTL must not be infinite nor 0");
+        this.maxTTL = maxTTL;
+        this.e2eEnabled = e2eEnabled;
+        if (requireE2E && !e2eEnabled)
+            throw new IllegalArgumentException("requiring e2e requires enablement");
+        this.requireE2E = requireE2E;
+        if (ignoreNonE2E && !e2eEnabled)
+            throw new IllegalArgumentException("ignoring non e2e requires enablement and requiring e2e");
+        this.ignoreNonE2E = ignoreNonE2E;
+        if (packetChargeCount < 4)
+            throw new IllegalArgumentException("packet charge count must be at least 4");
+        freeStore = new PacketStore();
+        PacketStore cStore = freeStore;
+        for (int i =1; i < packetChargeCount; i++) {
+            cStore.nextFreeStore = new PacketStore();
+            cStore = cStore.nextFreeStore;;
+        }
+        active = true;
+        receiveThread.setDaemon(true);
+        receiveThread.start();
     }
 
     /**
@@ -239,8 +267,16 @@ public class Router {
                             .setPacketData(nap).setPacketType(PacketType.BroadcastGraphing).setTTL(maxTTL)
                             .timeStamp());
                 case BroadcastGraphing, DirectNodesEID:
-                    nap.getNode(network, networkAddresses);
+                    GraphNode tcNode = nap.getNode(network, networkAddresses);
                     resetNextHops();
+                    if (packet.getType() == PacketType.DirectNodesEID) {
+                        AssociatedPayload bPayload;
+                        for (GraphNode eNode : tcNode.etherealNodes) {
+                            bPayload = new AssociatedPayload(eNode.ID, tcNode.ID);
+                            send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                                    .setPacketType(PacketType.BroadcastAssociateEID).setPacketData(bPayload).timeStamp());
+                        }
+                    }
                     break;
             }
         } else if (payload instanceof GatewayPayload gp &&
@@ -263,6 +299,9 @@ public class Router {
             owner.etherealNodes.remove(node);
             etherealNodeToOwner.remove(node.nodeID);
         }
+        if (!node.etherealNodes.isEmpty())
+            for (GraphNode eNode : node.etherealNodes)
+                removeNode(eNode);
         network.remove(node.nodeID);
         networkAddresses.remove(node.getIPv4AddressString());
         networkAddresses.remove(node.getIPv6AddressString());
@@ -428,6 +467,11 @@ public class Router {
                     send((BroadcastPacket) new UnicastPacket(ccdpl.getSize()).setDestinationAddress(packet.getSourceAddress())
                             .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitCreated)
                             .setPacketData(ccdpl).timeStamp());
+                    if (eReg != null) {
+                        AssociatedPayload bPayload = new AssociatedPayload(eReg.ID, thisNode.ID);
+                        send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                                .setPacketType(PacketType.BroadcastAssociateEID).setPacketData(bPayload).timeStamp());
+                    }
                 }
             } catch (GeneralSecurityException e) {
                 removeCircuitID(ocid);
@@ -832,6 +876,8 @@ public class Router {
         }
     }
 
+    ///TODO: Support broadcast to self routing with TTL decrementation and packet validation
+
     public void send(BroadcastPacket packet) {
         byte[] key = null;
         PacketType pt = packet.getType();
@@ -956,6 +1002,12 @@ public class Router {
         }
 
         public DataLinkProcessor start() {
+            AssociatedPayload bPayload = new AssociatedPayload(linkedNode.ID, linkedNode.kemKey);
+            send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                    .setPacketType(PacketType.BroadcastAssociateKEMKey).setPacketData(bPayload).timeStamp());
+            bPayload = new AssociatedPayload(linkedNode.ID, linkedNode.dsaKey);
+            send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                    .setPacketType(PacketType.BroadcastAssociateDSAKey).setPacketData(bPayload).timeStamp());
             recvThread.setDaemon(true);
             recvThread.start();
             return this;
@@ -986,9 +1038,19 @@ public class Router {
                 } else
                     processPacket(pk);
             }
+            linkedNode.transport = null;
             if (dataLink.isActive())
                 dataLink.close();
             dataLinks.remove(linkedNode.nodeID);
+            AssociatePayload bPayload = new AssociatePayload(linkedNode.ID);
+            send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                    .setPacketType(PacketType.BroadcastNodeDead).setPacketData(bPayload).timeStamp());
+            for (GraphNode eNode : linkedNode.etherealNodes) {
+                bPayload = new AssociatePayload(eNode.ID);
+                send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                        .setPacketType(PacketType.BroadcastDeAssociateEID).setPacketData(bPayload).timeStamp());
+            }
+            removeNode(linkedNode);
         }
     }
 }

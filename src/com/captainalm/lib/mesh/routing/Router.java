@@ -744,6 +744,7 @@ public class Router {
      * @param packet The received packet.
      */
     public void processPacket(Packet packet) {
+        packet.decrementTTL();
         if (packet instanceof BroadcastPacket bpk) {
             if (!addressAvailable(BytesToHex.bytesToHex(bpk.getSourceAddress())))
                 return;
@@ -864,8 +865,10 @@ public class Router {
         GraphNode[] dests;
         if (packet instanceof UnicastPacket upk)
             dests = getNextHops(BytesToHex.bytesToHex(upk.getDestinationAddress()));
-        else
+        else {
             dests = getNextHops(null);
+            processPacket(packet);
+        }
         if (dests == null) {
             processPacket(packet);
             return;
@@ -875,8 +878,6 @@ public class Router {
                 node.transport.send(packet.getPacketBytes());
         }
     }
-
-    ///TODO: Support broadcast to self routing with TTL decrementation and packet validation
 
     public void send(BroadcastPacket packet) {
         byte[] key = null;
@@ -1022,7 +1023,6 @@ public class Router {
                 Packet pk = Packet.getPacketFromBytes(data);
                 if (pk.getType() == PacketType.Unknown || !pk.timeStampInRange() || !pk.verifyHash(cryptoProvider.GetHasherInstance()))
                     continue;
-                pk.decrementTTL();
                 if (pk.getType().getMessagingType() == PacketMessagingType.Direct) {
                     Packet pkc = chargePacket(pk);
                     if (pkc != null) {

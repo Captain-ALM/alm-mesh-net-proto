@@ -337,12 +337,13 @@ public class Router {
     }
 
     protected void deleteCircuit(byte[] circuitID) {
+        // Broadcast circuit broken in both 'directions'
         String strCID = BytesToHex.bytesToHex(circuitID);
         BroadcastPacket toSend = null;
         PacketData sendPayload = null;
         BroadcastPacket toSend2 = null;
         PacketData sendPayload2 = null;
-        if (onionCircuitInitToOnionCircuitRemote.containsKey(strCID)) {
+        if (onionCircuitInitToOnionCircuitRemote.containsKey(strCID)) { // Owns this circuit
             String ocr = onionCircuitInitToOnionCircuitRemote.get(strCID);
             onionCircuitInitToOnionCircuitRemote.remove(strCID);
             if (ocr != null)
@@ -357,7 +358,7 @@ public class Router {
                         .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitBroken);
             }
             removeCircuitID(circuitID);
-            if (ocr != null && ocr.length() == 64) {
+            if (ocr != null && ocr.length() == 64) { // Endpoint circuit
                 GraphNode eNode = network.get(ocr);
                 if (eNode != null) {
                     sendPayload2 = new AssociatePayload(eNode.ID);
@@ -365,7 +366,7 @@ public class Router {
                             .setTTL(maxTTL).setPacketType(PacketType.BroadcastDeAssociateEID);
                     removeNode(eNode);
                 }
-            } else if (ocr != null) {
+            } else if (ocr != null) { // Forward circuit
                 sendPayload = new SinglePayload(circuitID);
                 remoteNode = onionCircuitRemoteToRemote.remove(ocr);
                 if (remoteNode != null) {
@@ -377,10 +378,10 @@ public class Router {
                 removeCircuitIDString(ocr);
 
             }
-        } else if (onionCircuitRemoteToOnionCircuitInit.containsKey(strCID) && circuitID.length == 16) {
+        } else if (onionCircuitRemoteToOnionCircuitInit.containsKey(strCID) && circuitID.length == 16) { // Attached to this circuit
             String oci = onionCircuitRemoteToOnionCircuitInit.get(strCID);
             onionCircuitRemoteToOnionCircuitInit.remove(strCID);
-            if (oci != null && oci.length() == 32) {
+            if (oci != null && oci.length() == 32) { // Forward circuit
                 onionCircuitInitToOnionCircuitRemote.remove(oci);
                 GraphNode remoteNode = onionCircuitRemoteToRemote.remove(strCID);
                 if (remoteNode != null) {
@@ -418,7 +419,7 @@ public class Router {
                 byte[] initKey = onionCircuitInitToEncryptionKey.get(oCID);
                 GraphNode initNode = onionCircuitInitToInit.get(oCID);
                 if (initKey != null && initNode != null) {
-                    if (addCircuitID(crtdp.getCircuitID())) {
+                    if (addCircuitID(crtdp.getCircuitID())) { // Success
                         try {
                             OnionPayload ocpy = new OnionPayload(new DataLayer(packet).encrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))
                                     .setCircuitID(BytesToHex.hexToBytes(oCID)));
@@ -427,7 +428,7 @@ public class Router {
                         } catch (GeneralSecurityException e) {
                             errors.add(e);
                         }
-                    } else {
+                    } else { // Fail, send broken to the remote
                         SinglePayload cpy = new SinglePayload(nid);
                         Packet toSendE = new UnicastPacket(cpy.getSize()).setDestinationAddress(thisNode.ID)
                                 .setSourceAddress(packet.getSourceAddress()).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitRejected)
@@ -514,7 +515,7 @@ public class Router {
             if (csNode != null && Arrays.equals(csNode.ID, packet.getSourceAddress())) {
                 byte[] initKey = onionCircuitInitToEncryptionKey.get(onionPayload.getLayer().getCircuitIDString());
                 String remote = onionCircuitInitToOnionCircuitRemote.get(onionPayload.getLayer().getCircuitIDString());
-                if (remote != null && initKey != null && remote.length() == 64) {
+                if (remote != null && initKey != null && remote.length() == 64) { // Ethereal relay out
                     GraphNode cdNode = network.get(remote);
                     if (onionPayload.getLayer() instanceof DataLayer odl) {
                         try {
@@ -525,7 +526,7 @@ public class Router {
                             errors.add(e);
                         }
                     }
-                } else if (remote != null && initKey != null) {
+                } else if (remote != null && initKey != null) { // Relay
                     GraphNode cdNode = onionCircuitRemoteToRemote.get(remote);
                     try {
                         OnionLayer nextLayer = onionPayload.getLayer().decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey)).getSubLayer();
@@ -539,7 +540,7 @@ public class Router {
                     } catch (GeneralSecurityException e) {
                         errors.add(e);
                     }
-                } else if (initKey != null) {
+                } else if (initKey != null) { // Relay with no remote; accept only circuit creat
                     if (onionPayload.getLayer() instanceof DataLayer odl) {
                         try {
                             Packet toSend = ((DataLayer) odl.decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))).getPacket();
@@ -567,7 +568,7 @@ public class Router {
                         }
                     }
                 }
-            } else {
+            } else { // Relay from remote
                 csNode = onionCircuitRemoteToRemote.get(onionPayload.getLayer().getCircuitIDString());
                 if (csNode != null && Arrays.equals(csNode.ID, packet.getSourceAddress())) {
                     String init = onionCircuitRemoteToOnionCircuitInit.get(onionPayload.getLayer().getCircuitIDString());
@@ -594,7 +595,7 @@ public class Router {
 
     protected void processEtherealNode(BroadcastPacket packet, GraphNode eNode) {
         String initCID = onionCircuitRemoteToOnionCircuitInit.get(eNode.nodeID);
-        if (initCID != null) {
+        if (initCID != null) { // Ethereal relay in
             byte[] initKey = onionCircuitInitToEncryptionKey.get(initCID);
             GraphNode initNode = onionCircuitInitToInit.get(initCID);
             if (initKey != null && initNode != null) {
@@ -741,7 +742,7 @@ public class Router {
                 hopInfoStore.put(node, new NodeHopInfo(node, 0));
                 hopProcessor(hopInfoStore, node, node, 0);
             }
-            missingNetwork.removeAll(thisNode.etherealNodes);
+            missingNetwork.removeAll(thisNode.etherealNodes); // Auto-detect missing nodes, exclude this node and its ethereals
             missingNetwork.remove(thisNode);
             for (Map.Entry<GraphNode, NodeHopInfo> entry : hopInfoStore.entrySet()) {
                 nextHop.put(entry.getKey().nodeID, entry.getValue().connectedTransport);
@@ -788,6 +789,12 @@ public class Router {
         }
     }
 
+    /**
+     * Make sure all packets are signed before being received.
+     *
+     * @param toCharge The packet to charge.
+     * @return The packet or null.
+     */
     private Packet chargePacket(Packet toCharge) {
         if (toCharge == null)
             return null;

@@ -44,6 +44,7 @@ public class Router {
     private final byte[] dsaPrivateKey;
 
     private final BlockingQueue<Exception> errors = new LinkedBlockingQueue<>();
+    private final BlockingQueue<NodeUpdate> updates = new LinkedBlockingQueue<>();
 
     protected final Map<String, DataLinkProcessor> dataLinks = new ConcurrentHashMap<>(); //ID to data links;
     protected final BlockingQueue<Packet> receiveQueue = new LinkedBlockingQueue<>();
@@ -149,6 +150,7 @@ public class Router {
             network.put(node.nodeID, existing);
             networkAddresses.put(node.getIPv4AddressString(), node);
             networkAddresses.put(node.getIPv6AddressString(), node);
+            updates.add(new NodeUpdate(node, false));
             resetNextHops();
         } else
             existing.combine(node);
@@ -195,6 +197,7 @@ public class Router {
                                 byte[] dKey = cryptoProvider.GetUnwrapperInstance().setPrivateKey(kemPrivateKey).unwrap(sp.getPayload());
                                 if (dKey != null) {
                                     erNode.setEncryptionKey(dKey, packet.getTimeStamp());
+                                    updates.add(new NodeUpdate(erNode, false));
                                     SinglePayload spts = new SinglePayload(cryptoProvider.GetCryptorInstance().setKey(erNode.getEncryptionKey())
                                             .encrypt(erNode.getEncryptionKey()));
                                     send((BroadcastPacket) new UnicastPacket(spts.getSize()).setDestinationAddress(upk.getSourceAddress())
@@ -214,8 +217,10 @@ public class Router {
                         if (erNode != null) {
                             try {
                                 byte[] dKey = cryptoProvider.GetCryptorInstance().setKey(erNode.getEncryptionKey()).decrypt(sp.getPayload());
-                                if (dKey != null)
+                                if (dKey != null) {
                                     erNode.setEncryptionKey(dKey, packet.getTimeStamp());
+                                    updates.add(new NodeUpdate(erNode, false));
+                                }
                             } catch (GeneralSecurityException e) {
                                 errors.add(e);
                             }
@@ -302,6 +307,7 @@ public class Router {
 ;       network.put(node.nodeID, node);
         networkAddresses.put(owner.getIPv4AddressString(), node);
         networkAddresses.put(owner.getIPv6AddressString(), node);
+        updates.add(new NodeUpdate(node, false));
         resetNextHops();
     }
 
@@ -317,6 +323,7 @@ public class Router {
         network.remove(node.nodeID);
         networkAddresses.remove(node.getIPv4AddressString());
         networkAddresses.remove(node.getIPv6AddressString());
+        updates.add(new NodeUpdate(node, true));
         if (node.isGateway)
             gateways.remove(node);
         String[] localOIDs = new String[0];
@@ -946,6 +953,7 @@ public class Router {
         try {
             SinglePayload enchp = new SinglePayload(cryptoProvider.GetWrapperInstance().setPublicKey(target.kemKey).wrap(key));
             target.setEncryptionKey(key, Instant.now().getEpochSecond());
+            updates.add(new NodeUpdate(target, false));
             send((BroadcastPacket) new UnicastPacket(enchp.getSize()).setDestinationAddress(target.ID)
                     .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastEncryptionRequestHandshake).setPacketData(enchp)
                     .timeStamp());
@@ -1113,5 +1121,27 @@ public class Router {
      */
     public Exception getFirstException() throws InterruptedException {
         return errors.take();
+    }
+
+    /**
+     * Provides a class for node updates.
+     */
+    public static class NodeUpdate {
+        public GraphNode node;
+        public boolean removed;
+        NodeUpdate(GraphNode node, boolean removed) {
+            this.node = node;
+            this.removed = removed;
+        }
+    }
+
+    /**
+     * Gets the first node update.
+     *
+     * @return The first node update.
+     * @throws InterruptedException Thread was interrupted.
+     */
+    public NodeUpdate getFirstUpdate() throws InterruptedException {
+        return updates.take();
     }
 }

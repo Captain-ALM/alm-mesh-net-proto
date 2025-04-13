@@ -94,6 +94,7 @@ public final class HandshakeProcessor {
                             if (kemPacket.getPacketData(true) instanceof AssociatedPayload asdp1
                                     && dsaPacket.getPacketData(true) instanceof AssociatedPayload asdp2
                                     && Arrays.equals(asdp1.getAssociateID(), asdp2.getAssociateID())) {
+                                // The ID itself is signed rather than a hash of this data
                                 byte[] ID = new byte[32];
                                 System.arraycopy(cProvider.GetHasherInstance().hash(asdp1.getAssociatedPayload()), 0, ID, 0, 16);
                                 System.arraycopy(cProvider.GetHasherInstance().hash(asdp2.getAssociatedPayload()), 0, ID, 16, 16);

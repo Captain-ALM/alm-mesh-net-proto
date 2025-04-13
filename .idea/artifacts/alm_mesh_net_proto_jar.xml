@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="alm-mesh-net-proto:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/alm_mesh_net_proto_jar</output-path>
+    <root id="archive" name="alm-mesh-net-proto.jar">
+      <element id="module-output" name="alm-mesh-net-proto" />
+    </root>
+  </artifact>
+</component>

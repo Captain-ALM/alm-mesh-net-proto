@@ -14,6 +14,8 @@ import java.security.GeneralSecurityException;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * Provides a way of handshaking two transports before routing commences.
@@ -48,123 +50,139 @@ public final class HandshakeProcessor {
     private final byte[] dsaPrivateKey;
     private final byte[] myEncKey;
 
+    private final BlockingQueue<Exception> errors = new LinkedBlockingQueue<>();
+
     private final Object lockNotify = new Object();
     private final Thread recvThread = new Thread(new Runnable() {
         @Override
         public void run() {
-            while (transport.isActive() && !failed && encKey == null) {
-                byte[] data = transport.receive();
-                if (data == null)
-                    return;
-                Packet pk = Packet.getPacketFromBytes(data);
-                if (pk.getType() == PacketType.Unknown || !pk.timeStampInRange() || !pk.verifyHash(cProvider.GetHasherInstance()))
-                    continue;
-                switch(pk.getType()) {
-                    case DirectHandshakeNoRecommendation -> noRecommendations = true;
-                    case DirectHandshakeKEMKey -> kemPacket = pk;
-                    case DirectHandshakeDSAKey -> dsaPacket = pk;
-                    case DirectHandshakeIDSignature -> sigPayloads = recvSigPacket(pk, sigPayloads);
-                    case DirectHandshakeDSARecommendationKey -> recSigPubPacket = pk;
-                    case DirectHandshakeDSARecommendationSignature -> recSigPayloads = recvSigPacket(pk, recSigPayloads);
-                    case DirectHandshakeAccept, DirectHandshakeReject -> {
-                        if (finalPacket == null)
-                            finalPacket = pk;
+            try {
+                while (transport.isActive() && !failed && encKey == null) {
+                    byte[] data = transport.receive();
+                    if (data == null)
+                        return;
+                    Packet pk = Packet.getPacketFromBytes(data);
+                    if (pk.getType() == PacketType.Unknown || !pk.timeStampInRange() || !pk.verifyHash(cProvider.GetHasherInstance()))
+                        continue;
+                    switch (pk.getType()) {
+                        case DirectHandshakeNoRecommendation -> noRecommendations = true;
+                        case DirectHandshakeKEMKey -> kemPacket = pk;
+                        case DirectHandshakeDSAKey -> dsaPacket = pk;
+                        case DirectHandshakeIDSignature -> sigPayloads = recvSigPacket(pk, sigPayloads);
+                        case DirectHandshakeDSARecommendationKey -> recSigPubPacket = pk;
+                        case DirectHandshakeDSARecommendationSignature ->
+                                recSigPayloads = recvSigPacket(pk, recSigPayloads);
+                        case DirectHandshakeAccept, DirectHandshakeReject -> {
+                            if (finalPacket == null)
+                                finalPacket = pk;
+                        }
+                        case DirectHandshakeSignature -> finalSigPayloads = recvSigPacket(pk, finalSigPayloads);
+                        default -> packets.add(pk);
                     }
-                    case DirectHandshakeSignature -> finalSigPayloads = recvSigPacket(pk, finalSigPayloads);
-                    default -> packets.add(pk);
-                }
-                if (remote == null) {
-                    if (kemPacket != null && dsaPacket != null && sigPayloads != null) {
-                        boolean bail = false;
-                        for (SignaturePayload p : sigPayloads) {
-                            if (p == null)
-                                bail = true;
-                        }
-                        if (bail)
-                            continue;
-                        byte[] sig = SignaturePayload.getSignatureFromFragments(sigPayloads, sigPayloads[0].getSignatureHash().readAllBytes(), cProvider.GetHasherInstance());
-                        if (kemPacket.getPacketData(true) instanceof AssociatedPayload asdp1
-                        && dsaPacket.getPacketData(true) instanceof AssociatedPayload asdp2
-                        && Arrays.equals(asdp1.getAssociateID(), asdp2.getAssociateID())) {
-                            byte[] ID = new byte[32];
-                            System.arraycopy(cProvider.GetHasherInstance().hash(asdp1.getAssociatedPayload()), 0, ID, 0, 16);
-                            System.arraycopy(cProvider.GetHasherInstance().hash(asdp2.getAssociatedPayload()), 0, ID, 16, 16);
-                            try {
-                                if (Arrays.equals(ID, asdp1.getAssociateID()) && Arrays.equals(ID, sigPayloads[0].getDataHash().readAllBytes())
-                                        && sig.length > 0 && cProvider.GetVerifierInstance().setPublicKey(asdp2.getAssociatedPayload()).verify(ID, sig)) {
-                                    // In this case, data hash is the pure ID
-                                    remote = new GraphNode(ID);
-                                    remote.kemKey = asdp1.getAssociatedPayload();
-                                    remote.dsaKey = asdp2.getAssociatedPayload();
-                                    remote.transport = transport;
-                                } else {
-                                    failed = true;
-                                }
-                            } catch (GeneralSecurityException ignored) {
-                                failed = true;
-                            }
-                        } else {
-                            failed = true;
-                        }
-                        synchronized (lockNotify) {
-                            lockNotify.notifyAll();
-                        }
-                    }
-                } else {
-                    if (!failed && !recommendProcessed && (noRecommendations != null || (recSigPayloads != null && recSigPubPacket != null))) {
-                        if (noRecommendations == null) {
+                    if (remote == null) {
+                        if (kemPacket != null && dsaPacket != null && sigPayloads != null) {
                             boolean bail = false;
-                            for (SignaturePayload p : recSigPayloads) {
-                                if (p == null)
+                            for (SignaturePayload p : sigPayloads) {
+                                if (p == null) {
                                     bail = true;
+                                    break;
+                                }
                             }
                             if (bail)
                                 continue;
-                            byte[] sig2 = SignaturePayload.getSignatureFromFragments(recSigPayloads, recSigPayloads[0].getSignatureHash().readAllBytes(), cProvider.GetHasherInstance());
-                            try {
-                                if (Arrays.equals(remote.ID, recSigPayloads[0].getDataHash().readAllBytes())
-                                        && sig2.length > 0 && recSigPubPacket.getPacketData(true) instanceof SinglePayload sp
-                                        && cProvider.GetVerifierInstance().setPublicKey(sp.getPayload()).verify(remote.ID, sig2)) {
-                                    noRecommendations = false;
-                                } else {
-                                    noRecommendations = true;
-                                }
-                            } catch (GeneralSecurityException ignored) {
-                                noRecommendations = true;
-                            }
-                        }
-                        recommendProcessed = true;
-                        synchronized (lockNotify) {
-                            lockNotify.notifyAll();
-                        }
-                    } else if (!failed && recommendProcessed && finalPacket != null && finalSigPayloads != null) {
-                        boolean bail = false;
-                        for (SignaturePayload p : finalSigPayloads) {
-                            if (p == null)
-                                bail = true;
-                        }
-                        if (bail)
-                            continue;
-                        byte[] sig = SignaturePayload.getSignatureFromFragments(finalSigPayloads, finalSigPayloads[0].getSignatureHash().readAllBytes(), cProvider.GetHasherInstance());
-                        try {
-                            if (Arrays.equals(finalPacket.getHash(), finalSigPayloads[0].getDataHash().readAllBytes()) &&
-                                    sig.length > 0 && cProvider.GetVerifierInstance().setPublicKey(remote.dsaKey).verify(finalPacket.getHash(), sig)) {
-                                if (finalPacket.getType() == PacketType.DirectHandshakeAccept && finalPacket.getPacketData(true) instanceof SinglePayload sp) {
-                                    encKey = cProvider.GetUnwrapperInstance().setPrivateKey(kemPrivateKey).unwrap(sp.getPayload());
-                                } else {
+                            byte[] sig = SignaturePayload.getSignatureFromFragments(sigPayloads, sigPayloads[0].getSignatureHash().readAllBytes(), cProvider.GetHasherInstance());
+                            if (kemPacket.getPacketData(true) instanceof AssociatedPayload asdp1
+                                    && dsaPacket.getPacketData(true) instanceof AssociatedPayload asdp2
+                                    && Arrays.equals(asdp1.getAssociateID(), asdp2.getAssociateID())) {
+                                byte[] ID = new byte[32];
+                                System.arraycopy(cProvider.GetHasherInstance().hash(asdp1.getAssociatedPayload()), 0, ID, 0, 16);
+                                System.arraycopy(cProvider.GetHasherInstance().hash(asdp2.getAssociatedPayload()), 0, ID, 16, 16);
+                                try {
+                                    if (Arrays.equals(ID, asdp1.getAssociateID()) && Arrays.equals(ID, sigPayloads[0].getDataHash().readAllBytes())
+                                            && sig.length > 0 && cProvider.GetVerifierInstance().setPublicKey(asdp2.getAssociatedPayload()).verify(ID, sig)) {
+                                        // In this case, data hash is the pure ID
+                                        remote = new GraphNode(ID);
+                                        remote.kemKey = asdp1.getAssociatedPayload();
+                                        remote.dsaKey = asdp2.getAssociatedPayload();
+                                        remote.transport = transport;
+                                    } else {
+                                        failed = true;
+                                    }
+                                } catch (GeneralSecurityException e) {
+                                    errors.add(e);
                                     failed = true;
                                 }
                             } else {
                                 failed = true;
                             }
-                        } catch (GeneralSecurityException e) {
-                            failed = true;
+                            synchronized (lockNotify) {
+                                lockNotify.notifyAll();
+                            }
                         }
-                        synchronized (lockNotify) {
-                            lockNotify.notifyAll();
+                    } else {
+                        if (!failed && !recommendProcessed && (noRecommendations != null || (recSigPayloads != null && recSigPubPacket != null))) {
+                            if (noRecommendations == null) {
+                                boolean bail = false;
+                                for (SignaturePayload p : recSigPayloads) {
+                                    if (p == null) {
+                                        bail = true;
+                                        break;
+                                    }
+                                }
+                                if (bail)
+                                    continue;
+                                byte[] sig2 = SignaturePayload.getSignatureFromFragments(recSigPayloads, recSigPayloads[0].getSignatureHash().readAllBytes(), cProvider.GetHasherInstance());
+                                try {
+                                    if (Arrays.equals(remote.ID, recSigPayloads[0].getDataHash().readAllBytes())
+                                            && sig2.length > 0 && recSigPubPacket.getPacketData(true) instanceof SinglePayload sp
+                                            && cProvider.GetVerifierInstance().setPublicKey(sp.getPayload()).verify(remote.ID, sig2)) {
+                                        noRecommendations = false;
+                                    } else {
+                                        noRecommendations = true;
+                                    }
+                                } catch (GeneralSecurityException e) {
+                                    errors.add(e);
+                                    noRecommendations = true;
+                                }
+                            }
+                            recommendProcessed = true;
+                            synchronized (lockNotify) {
+                                lockNotify.notifyAll();
+                            }
+                        } else if (!failed && recommendProcessed && finalPacket != null && finalSigPayloads != null) {
+                            boolean bail = false;
+                            for (SignaturePayload p : finalSigPayloads) {
+                                if (p == null) {
+                                    bail = true;
+                                    break;
+                                }
+                            }
+                            if (bail)
+                                continue;
+                            byte[] sig = SignaturePayload.getSignatureFromFragments(finalSigPayloads, finalSigPayloads[0].getSignatureHash().readAllBytes(), cProvider.GetHasherInstance());
+                            try {
+                                if (Arrays.equals(finalPacket.getHash(), finalSigPayloads[0].getDataHash().readAllBytes()) &&
+                                        sig.length > 0 && cProvider.GetVerifierInstance().setPublicKey(remote.dsaKey).verify(finalPacket.getHash(), sig)) {
+                                    if (finalPacket.getType() == PacketType.DirectHandshakeAccept && finalPacket.getPacketData(true) instanceof SinglePayload sp) {
+                                        encKey = cProvider.GetUnwrapperInstance().setPrivateKey(kemPrivateKey).unwrap(sp.getPayload());
+                                    } else {
+                                        failed = true;
+                                    }
+                                } else {
+                                    failed = true;
+                                }
+                            } catch (GeneralSecurityException e) {
+                                errors.add(e);
+                                failed = true;
+                            }
+                            synchronized (lockNotify) {
+                                lockNotify.notifyAll();
+                            }
                         }
                     }
                 }
+            } catch (RuntimeException e) {
+                errors.add(e);
             }
         }
     });
@@ -212,7 +230,7 @@ public final class HandshakeProcessor {
         toSend.timeStamp().calculateHash(cProvider.GetHasherInstance());
         transport.send(toSend.getPacketBytes());
         if (sendSignatures) {
-            Packet[] toSendSigs = toSend.getSignaturePackets(cProvider.GetHasherInstance(), cProvider.GetSignerInstance(), 1210);
+            Packet[] toSendSigs = toSend.getSignaturePackets(cProvider.GetHasherInstance(), cProvider.GetSignerInstance().setPrivateKey(dsaPrivateKey), 1210);
             for (Packet p : toSendSigs)
                 transport.send(p.setPacketType(PacketType.DirectHandshakeSignature).calculateHash(cProvider.GetHasherInstance()).getPacketBytes());
         }
@@ -247,6 +265,7 @@ public final class HandshakeProcessor {
             send(new AssociatedPayload(local.ID, local.kemKey), PacketType.DirectHandshakeKEMKey, false);
             send(new AssociatedPayload(local.ID, local.dsaKey), PacketType.DirectHandshakeDSAKey, false);
         } catch (GeneralSecurityException e) {
+            errors.add(e);
             failed = true;
             return null;
         }
@@ -256,6 +275,7 @@ public final class HandshakeProcessor {
             for (SignaturePayload sig : sigs)
                 send(sig, PacketType.DirectHandshakeIDSignature, false);
         } catch (GeneralSecurityException e) {
+            errors.add(e);
             failed = true;
             return null;
         }
@@ -274,6 +294,7 @@ public final class HandshakeProcessor {
                 send(sig, PacketType.DirectHandshakeDSARecommendationSignature, false);
         }
         } catch (GeneralSecurityException e) {
+            errors.add(e);
             failed = true;
             return null;
         }
@@ -287,6 +308,7 @@ public final class HandshakeProcessor {
             else
                 send(null, PacketType.DirectHandshakeReject, true);
         } catch (GeneralSecurityException e) {
+            errors.add(e);
             failed = true;
             return null;
         }
@@ -313,5 +335,15 @@ public final class HandshakeProcessor {
      */
     public List<Packet> getOtherPackets() {
         return packets;
+    }
+
+    /**
+     * Gets the first Exception.
+     *
+     * @return The first exception received.
+     * @throws InterruptedException Thread was interrupted.
+     */
+    public Exception getFirstException() throws InterruptedException {
+        return errors.take();
     }
 }

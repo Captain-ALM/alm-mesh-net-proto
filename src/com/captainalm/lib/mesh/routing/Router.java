@@ -1,6 +1,5 @@
 package com.captainalm.lib.mesh.routing;
 
-import com.captainalm.lib.mesh.crypto.ICryptor;
 import com.captainalm.lib.mesh.crypto.IProvider;
 import com.captainalm.lib.mesh.handshake.HandshakeProcessor;
 import com.captainalm.lib.mesh.packets.*;
@@ -44,14 +43,20 @@ public class Router {
     private final byte[] kemPrivateKey;
     private final byte[] dsaPrivateKey;
 
+    private final BlockingQueue<Exception> errors = new LinkedBlockingQueue<>();
+
     protected final Map<String, DataLinkProcessor> dataLinks = new ConcurrentHashMap<>(); //ID to data links;
     protected final BlockingQueue<Packet> receiveQueue = new LinkedBlockingQueue<>();
     protected final Thread receiveThread = new Thread(() -> {
-        while (active) {
-            try {
-                protectedReceive(receiveQueue.take());
-            } catch (InterruptedException ignored) {
+        try {
+            while (active) {
+                try {
+                    protectedReceive(receiveQueue.take());
+                } catch (InterruptedException ignored) {
+                }
             }
+        } catch (RuntimeException e) {
+            errors.add(e);
         }
     });
 
@@ -167,6 +172,7 @@ public class Router {
     public void deactivate(boolean shutdownTransports) {
         active = false;
         pkProcessor.terminate();
+        receiveThread.interrupt();
         if (shutdownTransports) {
             for (DataLinkProcessor processor : dataLinks.values())
                 processor.dataLink.close();
@@ -196,7 +202,8 @@ public class Router {
                                             .setPacketData(spts).timeStamp());
                                 } else
                                     throw new GeneralSecurityException();
-                            } catch (GeneralSecurityException ignored) {
+                            } catch (GeneralSecurityException e) {
+                                errors.add(e);
                                 send((BroadcastPacket) new UnicastPacket(0).setDestinationAddress(upk.getSourceAddress())
                                         .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastEncryptionRejectedHandshake)
                                         .timeStamp());
@@ -209,7 +216,8 @@ public class Router {
                                 byte[] dKey = cryptoProvider.GetCryptorInstance().setKey(erNode.getEncryptionKey()).decrypt(sp.getPayload());
                                 if (dKey != null)
                                     erNode.setEncryptionKey(dKey, packet.getTimeStamp());
-                            } catch (GeneralSecurityException ignored) {
+                            } catch (GeneralSecurityException e) {
+                                errors.add(e);
                             }
                         }
                     } else if (pt == PacketType.UnicastEncryptionRejectedHandshake) {
@@ -232,7 +240,8 @@ public class Router {
                         processOnion(upk);
                     else
                         pkProcessor.processPacket(packet);
-                } catch (IOException ignored) {
+                } catch (IOException e) {
+                    errors.add(e);
                 }
             }
         }
@@ -253,7 +262,10 @@ public class Router {
                 case BroadcastAssociateKEMKey, BroadcastAssociateDSAKey -> {
                     GraphNode owner = network.get(BytesToHex.bytesToHex(adp.getAssociateID()));
                     if (owner != null)
-                        owner.kemKey = adp.getAssociatedPayload();
+                        if (packet.getType() == PacketType.BroadcastAssociateKEMKey)
+                            owner.kemKey = adp.getAssociatedPayload();
+                        else
+                            owner.dsaKey = adp.getAssociatedPayload();
                 }
             }
         } else if (payload instanceof AssociatePayload ap) {
@@ -405,7 +417,8 @@ public class Router {
                                     .setCircuitID(BytesToHex.hexToBytes(oCID)));
                             send((BroadcastPacket) new UnicastPacket(ocpy.getSize()).setDestinationAddress(initNode.ID).setSourceAddress(thisNode.ID).setTTL(maxTTL)
                                     .setPacketType(PacketType.UnicastOnion).setPacketData(ocpy).timeStamp());
-                        } catch (GeneralSecurityException ignored) {
+                        } catch (GeneralSecurityException e) {
+                            errors.add(e);
                         }
                     } else {
                         SinglePayload cpy = new SinglePayload(nid);
@@ -417,7 +430,8 @@ public class Router {
                                     .setCircuitID(BytesToHex.hexToBytes(oCID)));
                             send((BroadcastPacket) new UnicastPacket(ocpy.getSize()).setDestinationAddress(initNode.ID).setSourceAddress(thisNode.ID).setTTL(maxTTL)
                                     .setPacketType(PacketType.UnicastOnion).setPacketData(ocpy).timeStamp());
-                        } catch (GeneralSecurityException ignored) {
+                        } catch (GeneralSecurityException e) {
+                            errors.add(e);
                         }
                         cpy = new SinglePayload(crtdp.getCircuitID());
                         send((BroadcastPacket) new UnicastPacket(cpy.getSize()).setDestinationAddress(packet.getSourceAddress()).setSourceAddress(thisNode.ID)
@@ -437,7 +451,8 @@ public class Router {
                                 .setCircuitID(BytesToHex.hexToBytes(oCID)));
                         send((BroadcastPacket) new UnicastPacket(ocpy.getSize()).setDestinationAddress(initNode.ID).setSourceAddress(thisNode.ID).setTTL(maxTTL)
                                 .setPacketType(PacketType.UnicastOnion).setPacketData(ocpy).timeStamp());
-                    } catch (GeneralSecurityException ignored) {
+                    } catch (GeneralSecurityException e) {
+                        errors.add(e);
                     }
                 }
             }
@@ -474,6 +489,7 @@ public class Router {
                     }
                 }
             } catch (GeneralSecurityException e) {
+                errors.add(e);
                 removeCircuitID(ocid);
                 reject = true;
                 if (eReg != null)
@@ -498,7 +514,8 @@ public class Router {
                             Packet toSend = ((DataLayer) odl.decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))).getPacket();
                             if (toSend instanceof BroadcastPacket tsbpk && Arrays.equals(cdNode.ID, tsbpk.getSourceAddress()))
                                 route((BroadcastPacket) toSend);
-                        } catch (GeneralSecurityException ignored) {
+                        } catch (GeneralSecurityException e) {
+                            errors.add(e);
                         }
                     }
                 } else if (remote != null && initKey != null) {
@@ -512,7 +529,8 @@ public class Router {
                                     .setPacketData(newPayload).timeStamp();
                             send((BroadcastPacket) toSend);
                         }
-                    } catch (GeneralSecurityException ignored) {
+                    } catch (GeneralSecurityException e) {
+                        errors.add(e);
                     }
                 } else if (initKey != null) {
                     if (onionPayload.getLayer() instanceof DataLayer odl) {
@@ -537,7 +555,8 @@ public class Router {
                                 }
                                 send((BroadcastPacket) toSend.timeStamp());
                             }
-                        } catch (GeneralSecurityException ignored) {
+                        } catch (GeneralSecurityException e) {
+                            errors.add(e);
                         }
                     }
                 }
@@ -557,6 +576,7 @@ public class Router {
                                         .setTTL(maxTTL).setPacketType(PacketType.UnicastOnion).setPacketData(newPayload).timeStamp();
                                 send((BroadcastPacket) toSend);
                             } catch (GeneralSecurityException e) {
+                                errors.add(e);
                             }
                         }
                     }
@@ -575,6 +595,7 @@ public class Router {
                 try {
                     upper.encrypt(cryptoProvider.GetCryptorInstance().setKey(initKey));
                 } catch (GeneralSecurityException e) {
+                    errors.add(e);
                     return;
                 }
                 OnionPayload payload = new OnionPayload(upper.setCircuitID(BytesToHex.hexToBytes(initCID)));
@@ -607,7 +628,8 @@ public class Router {
         return circuitID;
     }
 
-    public boolean addCircuitID(byte[] circuitID) {
+    //*
+    protected boolean addCircuitID(byte[] circuitID) {
         synchronized (lockOnionCircuitIDs) {
             if (onionCircuitIDs.contains(BytesToHex.bytesToHex(circuitID)))
                 return false;
@@ -626,7 +648,8 @@ public class Router {
         removeCircuitIDString(BytesToHex.bytesToHex(circuitID));
     }
 
-    public byte[] generateNID() {
+    //*
+    protected byte[] generateNID() {
         byte[] NID = new byte[16];
         synchronized (locknIDs) {
             boolean contained = true;
@@ -817,7 +840,7 @@ public class Router {
                 while (store.packetHash == null) {
                     try {
                         store.wait();
-                    } catch (InterruptedException e) {
+                    } catch (InterruptedException ignored) {
                         return null;
                     }
                 }
@@ -829,6 +852,7 @@ public class Router {
                             if (!StreamEquals.streamEqualsArray(signaturePayload.getSignatureHash(), store.signatureHash))
                                 return null;
                         } catch (IOException e) {
+                            errors.add(e);
                             return null;
                         }
                     }
@@ -843,15 +867,18 @@ public class Router {
         synchronized (store) {
             Packet toret = null;
             byte[] sig = SignaturePayload.getSignatureFromFragments(store.packetSignature, store.signatureHash, cryptoProvider.GetHasherInstance());
-            if (sig.length > 0) {
-                if (store.packet.validateWithSignature(cryptoProvider.GetHasherInstance(), cryptoProvider.GetVerifierInstance(), sig))
-                    toret = store.packet;
-                synchronized (packetChargeLock) {
-                    store.olderStore.newerStore = store.newerStore;
-                    store.newerStore.olderStore = store.olderStore;
-                    store.nextFreeStore = freeStore;
-                    freeStore = store;
-                    packetStore.remove(pkHashStr);
+            if (sig.length > 0 && store.packet instanceof BroadcastPacket bpk) {
+                GraphNode cNode = network.get(BytesToHex.bytesToHex(bpk.getSourceAddress()));
+                if (cNode != null) {
+                    if (store.packet.validateWithSignature(cryptoProvider.GetHasherInstance(), cryptoProvider.GetVerifierInstance().setPublicKey(cNode.dsaKey), sig))
+                        toret = store.packet;
+                    synchronized (packetChargeLock) {
+                        store.olderStore.newerStore = store.newerStore;
+                        store.newerStore.olderStore = store.olderStore;
+                        store.nextFreeStore = freeStore;
+                        freeStore = store;
+                        packetStore.remove(pkHashStr);
+                    }
                 }
             }
             return toret;
@@ -876,7 +903,8 @@ public class Router {
         }
     }
 
-    public void send(BroadcastPacket packet) {
+    //*
+    protected void send(BroadcastPacket packet) {
         byte[] key = null;
         PacketType pt = packet.getType();
         if (pt != PacketType.UnicastSignature && pt != PacketType.UnicastEncryptionRejectedHandshake &&
@@ -895,6 +923,8 @@ public class Router {
                 }
             }
         }
+        if (key == null && e2eEnabled && requireE2E)
+            return;
         try {
             if (key != null)
                 packet.Encrypt(cryptoProvider.GetCryptorInstance().setKey(key));
@@ -906,6 +936,7 @@ public class Router {
             }
             route(packet);
         } catch (GeneralSecurityException e) {
+            errors.add(e);
         }
     }
 
@@ -920,11 +951,13 @@ public class Router {
                     .timeStamp());
             return key;
         } catch (GeneralSecurityException e) {
+            errors.add(e);
             return null;
         }
     }
 
-    public void receive(BroadcastPacket packet) {
+    //*
+    protected void receive(BroadcastPacket packet) {
         if (packet instanceof UnicastPacket upk && !Arrays.equals(upk.getDestinationAddress(), thisNode.ID)) {
             receiveQueue.add(packet);
             return; //Code to process handshake translated extra packets
@@ -937,8 +970,9 @@ public class Router {
                     byte[] key = sour.getEncryptionKey();
                     if (key != null) {
                         try {
-                            packet.Decrypt(cryptoProvider.GetCryptorInstance());
+                            packet.Decrypt(cryptoProvider.GetCryptorInstance().setKey(key));
                         } catch (GeneralSecurityException e) {
+                            errors.add(e);
                             return;
                         }
                     }
@@ -953,6 +987,12 @@ public class Router {
         }
     }
 
+    /**
+     * Gets a node ID given a string IP address.
+     *
+     * @param addressIP The IP address as hex.
+     * @return The ID of the associated node.
+     */
     public byte[] getNodeID(String addressIP) {
         GraphNode n = networkAddresses.get(addressIP);
         if (n == null)
@@ -960,10 +1000,20 @@ public class Router {
         return n.ID;
     }
 
+    /**
+     * Gets the ID of this node.
+     *
+     * @return The ID of this node.
+     */
     public byte[] getThisNodeID() {
         return thisNode.ID;
     }
 
+    /**
+     * Gets the current gateway node ID, if any.
+     *
+     * @return The gateway ID or null.
+     */
     public byte[] getGatewayNodeID() {
         GraphNode n = null;
         for (GraphNode node : gateways) {
@@ -1013,41 +1063,55 @@ public class Router {
 
         @Override
         public void run() {
-            while(active && dataLink.isActive()) {
-                byte[] data = dataLink.receive();
-                if (data == null)
-                    return;
-                Packet pk = Packet.getPacketFromBytes(data);
-                if (pk.getType() == PacketType.Unknown || !pk.timeStampInRange() || !pk.verifyHash(cryptoProvider.GetHasherInstance()))
-                    continue;
-                if (pk.getType().getMessagingType() == PacketMessagingType.Direct) {
-                    Packet pkc = chargePacket(pk);
-                    if (pkc != null) {
-                        if (pkc.getType() == PacketType.DirectGatewayAvailable) {
-                            linkedNode.isGateway = true;
-                            gateways.add(linkedNode);
-                        } else if (pkc.getType() == PacketType.DirectGraphing || pkc.getType() == PacketType.DirectNodesEID) {
-                            pk = new BroadcastPacket(pkc.getPayloadSize()).setSourceAddress(linkedNode.ID)
-                                    .setPacketData(pkc.getPacketData(true)).setPacketType(pkc.getType());
-                            receiveQueue.add(pk);
+            try {
+                while (active && dataLink.isActive()) {
+                    byte[] data = dataLink.receive();
+                    if (data == null)
+                        return;
+                    Packet pk = Packet.getPacketFromBytes(data);
+                    if (pk.getType() == PacketType.Unknown || !pk.timeStampInRange() || !pk.verifyHash(cryptoProvider.GetHasherInstance()))
+                        continue;
+                    if (pk.getType().getMessagingType() == PacketMessagingType.Direct) {
+                        Packet pkc = chargePacket(pk);
+                        if (pkc != null) {
+                            if (pkc.getType() == PacketType.DirectGatewayAvailable) {
+                                linkedNode.isGateway = true;
+                                gateways.add(linkedNode);
+                            } else if (pkc.getType() == PacketType.DirectGraphing || pkc.getType() == PacketType.DirectNodesEID) {
+                                pk = new BroadcastPacket(pkc.getPayloadSize()).setSourceAddress(linkedNode.ID)
+                                        .setPacketData(pkc.getPacketData(true)).setPacketType(pkc.getType());
+                                receiveQueue.add(pk);
+                            }
                         }
-                    }
-                } else
-                    processPacket(pk);
-            }
-            linkedNode.transport = null;
-            if (dataLink.isActive())
-                dataLink.close();
-            dataLinks.remove(linkedNode.nodeID);
-            AssociatePayload bPayload = new AssociatePayload(linkedNode.ID);
-            send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
-                    .setPacketType(PacketType.BroadcastNodeDead).setPacketData(bPayload).timeStamp());
-            for (GraphNode eNode : linkedNode.etherealNodes) {
-                bPayload = new AssociatePayload(eNode.ID);
+                    } else
+                        processPacket(pk);
+                }
+                linkedNode.transport = null;
+                if (dataLink.isActive())
+                    dataLink.close();
+                dataLinks.remove(linkedNode.nodeID);
+                AssociatePayload bPayload = new AssociatePayload(linkedNode.ID);
                 send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
-                        .setPacketType(PacketType.BroadcastDeAssociateEID).setPacketData(bPayload).timeStamp());
+                        .setPacketType(PacketType.BroadcastNodeDead).setPacketData(bPayload).timeStamp());
+                for (GraphNode eNode : linkedNode.etherealNodes) {
+                    bPayload = new AssociatePayload(eNode.ID);
+                    send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                            .setPacketType(PacketType.BroadcastDeAssociateEID).setPacketData(bPayload).timeStamp());
+                }
+                removeNode(linkedNode);
+            } catch (RuntimeException e) {
+                errors.add(e);
             }
-            removeNode(linkedNode);
         }
+    }
+
+    /**
+     * Gets the first Exception.
+     *
+     * @return The first exception received.
+     * @throws InterruptedException Thread was interrupted.
+     */
+    public Exception getFirstException() throws InterruptedException {
+        return errors.take();
     }
 }

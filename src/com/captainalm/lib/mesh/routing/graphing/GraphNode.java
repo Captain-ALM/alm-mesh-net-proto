@@ -1,5 +1,6 @@
 package com.captainalm.lib.mesh.routing.graphing;
 
+import com.captainalm.lib.mesh.crypto.IHasher;
 import com.captainalm.lib.mesh.transport.INetTransport;
 import com.captainalm.lib.mesh.utils.BytesToHex;
 
@@ -41,6 +42,23 @@ public final class GraphNode {
     public GraphNode(byte[] ID) {
         this.ID = ID;
         this.nodeID = BytesToHex.bytesToHex(ID);
+    }
+
+    /**
+     * Constructs a new GraphNode given the keys.
+     *
+     * @param kemKey The ML-KEM Key.
+     * @param dsaKey The ML-DSA Key.
+     * @param hProvider The hash provider to use.
+     * @throws IllegalArgumentException a parameter is null
+     */
+    public GraphNode(byte[] kemKey, byte[] dsaKey, IHasher hProvider) {
+        if (kemKey == null || dsaKey == null || hProvider == null)
+            throw new IllegalArgumentException("a parameter is null");
+        this.ID = new byte[32];
+        System.arraycopy(hProvider.hash(kemKey), 0, this.ID, 0, 16);
+        System.arraycopy(hProvider.hash(dsaKey), 0, this.ID, 16, 16);
+        this.nodeID = BytesToHex.bytesToHex(this.ID);
     }
 
     /**

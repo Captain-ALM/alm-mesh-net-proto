@@ -815,7 +815,7 @@ public class Router {
         synchronized (packetChargeLock) {
             store = packetStore.get(pkHashStr);
         }
-        if (store == null) {
+        if (store == null) { // Allocate new store if packet not found by hash
             synchronized (packetChargeLock) {
                 if (freeStore == null) {
                     store = oldestStore;
@@ -835,7 +835,7 @@ public class Router {
                     packetStore.put(pkHashStr, store);
                 }
             }
-            synchronized (store) {
+            synchronized (store) { // Set store contents
                 store.packetHash = pkHash;
                 if (signaturePayload != null) {
                     store.signatureHash = signaturePayload.getSignatureHash().readAllBytes();
@@ -851,14 +851,14 @@ public class Router {
             }
         } else {
             synchronized (store) {
-                while (store.packetHash == null) {
+                while (store.packetHash == null) {  // Wait until store has a hash
                     try {
                         store.wait();
                     } catch (InterruptedException ignored) {
                         return null;
                     }
                 }
-                if (signaturePayload != null) {
+                if (signaturePayload != null) { // Update store contents
                     if (store.signatureHash == null)
                         store.signatureHash = signaturePayload.getSignatureHash().readAllBytes();
                     else {
@@ -878,7 +878,7 @@ public class Router {
                     store.packet = toCharge;
             }
         }
-        synchronized (store) {
+        synchronized (store) { // Check if store is now ready to be received
             Packet toret = null;
             byte[] sig = SignaturePayload.getSignatureFromFragments(store.packetSignature, store.signatureHash, cryptoProvider.GetHasherInstance());
             if (sig.length > 0 && store.packet instanceof BroadcastPacket bpk) {
@@ -937,7 +937,7 @@ public class Router {
                 }
             }
         }
-        if (key == null && e2eEnabled && requireE2E)
+        if (key == null && e2eEnabled && requireE2E && packet instanceof UnicastPacket)
             return;
         try {
             if (key != null)

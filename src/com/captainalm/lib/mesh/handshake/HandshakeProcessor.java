@@ -52,6 +52,8 @@ public final class HandshakeProcessor {
 
     private final BlockingQueue<Exception> errors = new LinkedBlockingQueue<>();
 
+    private boolean localAuthorizeSuccess = false;
+
     private final Object lockNotify = new Object();
     private final Thread recvThread = new Thread(new Runnable() {
         @Override
@@ -239,9 +241,10 @@ public final class HandshakeProcessor {
 
     /**
      * Handshakes on the transport.
+     * Use {@link #localAuthorizeSuccess()} for checking local failure after running this function.
      *
      * @param timeout Aa timeout during one of the 3 response wait cycles.
-     * @return The shared session key or null of failure.
+     * @return The shared session key or null on remote failure.
      * @throws InterruptedException The handshake was interrupted on-thread.
      */
     public byte[] handshake(int timeout) throws InterruptedException {
@@ -250,11 +253,12 @@ public final class HandshakeProcessor {
 
     /**
      * Handshakes on the transport with the specified recommendation.
+     * Use {@link #localAuthorizeSuccess()} for checking local failure after running this function.
      *
      * @param timeout Aa timeout during one of the 3 response wait cycles.
      * @param publicRecommendKey The public key used to verify the recommendation.
      * @param recommendSignature The signature of this node ID using the recommendation private key.
-     * @return The shared session key or null of failure.
+     * @return The shared session key or null on remote failure.
      * @throws InterruptedException The handshake was interrupted on-thread.
      */
     public byte[] handshake(int timeout, byte[] publicRecommendKey, byte[] recommendSignature) throws InterruptedException {
@@ -304,9 +308,10 @@ public final class HandshakeProcessor {
                 lockNotify.wait(timeout);
         }
         try {
-            if (authorizer.authorize(remote.ID, (noRecommendations) ? null : ((SinglePayload) recSigPubPacket.getPacketData(true)).getPayload()))
+            if (authorizer.authorize(remote.ID, (noRecommendations) ? null : ((SinglePayload) recSigPubPacket.getPacketData(true)).getPayload())) {
+                localAuthorizeSuccess = true;
                 send(new SinglePayload(cProvider.GetWrapperInstance().setPublicKey(remote.kemKey).wrap(myEncKey)), PacketType.DirectHandshakeAccept, true);
-            else
+            } else
                 send(null, PacketType.DirectHandshakeReject, true);
         } catch (GeneralSecurityException e) {
             errors.add(e);
@@ -318,6 +323,16 @@ public final class HandshakeProcessor {
                 lockNotify.wait(timeout);
         }
         return encKey;
+    }
+
+    /**
+     * Gets whether the local authorization via {@link IPeerAuthorizer} was a success.
+     * This should be checked alongside the return value of {@link #handshake(int, byte[], byte[])}.
+     *
+     * @return If the local authorization succeeded.
+     */
+    public boolean localAuthorizeSuccess() {
+        return localAuthorizeSuccess;
     }
 
     /**

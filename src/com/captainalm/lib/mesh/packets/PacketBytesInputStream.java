@@ -1,6 +1,7 @@
 package com.captainalm.lib.mesh.packets;
 
 import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
+import com.captainalm.lib.mesh.utils.InputStreamTransfer;
 import com.captainalm.lib.mesh.utils.IntOnStream;
 import com.captainalm.lib.mesh.utils.LengthClampedInputStream;
 
@@ -49,7 +50,7 @@ public final class PacketBytesInputStream implements Closeable {
         ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(buffer, 0, buffer.length);
         ovrw.write(readHeader);
         IntOnStream.WriteShort(ovrw, sz);
-        new LengthClampedInputStream(in, sz).transferTo(ovrw);
+        InputStreamTransfer.streamTransfer(new LengthClampedInputStream(in, sz), ovrw);
         return buffer;
     }
 

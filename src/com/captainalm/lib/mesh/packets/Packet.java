@@ -6,6 +6,7 @@ import com.captainalm.lib.mesh.crypto.ISigner;
 import com.captainalm.lib.mesh.crypto.IVerifier;
 import com.captainalm.lib.mesh.packets.data.*;
 import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
+import com.captainalm.lib.mesh.utils.InputStreamTransfer;
 import com.captainalm.lib.mesh.utils.IntOnStream;
 import com.captainalm.lib.mesh.utils.StreamEquals;
 
@@ -171,7 +172,7 @@ public class Packet {
         int copyLen = Math.min(data.length - 32 - getPacketDataStartIndex(), payload.getSize());
         ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(data, getPacketDataStartIndex(), copyLen);
         try {
-            payload.getData().transferTo(ovrw);
+            InputStreamTransfer.streamTransfer(payload.getData(), ovrw);
         } catch (IOException e) {
         }
         if (isEncrypted()) data[1] = getType().getID();

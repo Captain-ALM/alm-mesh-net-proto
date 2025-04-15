@@ -3,6 +3,7 @@ package com.captainalm.lib.mesh.packets.data;
 import com.captainalm.lib.mesh.packets.Packet;
 import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
 import com.captainalm.lib.mesh.utils.BytesToHex;
+import com.captainalm.lib.mesh.utils.InputStreamTransfer;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -42,7 +43,7 @@ public class CircuitCreatedPayload extends PacketData implements INonce {
             this.circuitID = circuitID;
             this.strCircuitID = BytesToHex.bytesToHex(circuitID);
             try {
-                nonce.transferTo(new ByteBufferOverwriteOutputStream(data, 0, 16));
+                InputStreamTransfer.streamTransfer(nonce, new ByteBufferOverwriteOutputStream(data, 0, 16));
             } catch (IOException ignored) {
             }
             System.arraycopy(circuitID, 0, data, 16, 16);

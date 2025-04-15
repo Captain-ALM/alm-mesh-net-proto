@@ -4,6 +4,7 @@ import com.captainalm.lib.mesh.crypto.IHasher;
 import com.captainalm.lib.mesh.packets.Packet;
 import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
 import com.captainalm.lib.mesh.utils.BytesToHex;
+import com.captainalm.lib.mesh.utils.InputStreamTransfer;
 import com.captainalm.lib.mesh.utils.IntOnStream;
 
 import java.io.ByteArrayInputStream;
@@ -142,7 +143,7 @@ public class SignaturePayload extends PacketData {
      */
     public void writeSignatureFragment(OutputStream out) {
         try {
-            new ByteArrayInputStream(data, this.dataStartIndex + 70, dataSize - 70).transferTo(out);
+            InputStreamTransfer.streamTransfer(new ByteArrayInputStream(data, this.dataStartIndex + 70, dataSize - 70), out);
         } catch (IOException ignored) {
         }
     }

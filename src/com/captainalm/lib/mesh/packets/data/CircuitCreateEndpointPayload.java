@@ -2,6 +2,7 @@ package com.captainalm.lib.mesh.packets.data;
 
 import com.captainalm.lib.mesh.packets.Packet;
 import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
+import com.captainalm.lib.mesh.utils.InputStreamTransfer;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -38,7 +39,7 @@ public class CircuitCreateEndpointPayload extends CircuitCreatePayload {
         this.wrappedKey = wrappedKey;
         if (dataSize > 0) {
             try {
-                nonce.transferTo(new ByteBufferOverwriteOutputStream(data, 0, 16));
+                InputStreamTransfer.streamTransfer(nonce, new ByteBufferOverwriteOutputStream(data, 0, 16));
             } catch (IOException ignored) {
             }
             System.arraycopy(wrappedKey, 0, data, 16, wrappedKey.length);

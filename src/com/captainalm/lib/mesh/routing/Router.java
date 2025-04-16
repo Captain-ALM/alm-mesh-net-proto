@@ -285,13 +285,16 @@ public class Router {
                             .timeStamp());
                 case BroadcastGraphing, DirectNodesEID:
                     GraphNode tcNode = nap.getNode(network, networkAddresses);
-                    resetNextHops();
-                    if (packet.getType() == PacketType.DirectNodesEID) {
-                        AssociatedPayload bPayload;
-                        for (GraphNode eNode : tcNode.etherealNodes) {
-                            bPayload = new AssociatedPayload(eNode.ID, tcNode.ID);
-                            send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
-                                    .setPacketType(PacketType.BroadcastAssociateEID).setPacketData(bPayload).timeStamp());
+                    if (tcNode != null) {
+                        updates.add(new NodeUpdate(tcNode, false));
+                        resetNextHops();
+                        if (packet.getType() == PacketType.DirectNodesEID) {
+                            AssociatedPayload bPayload;
+                            for (GraphNode eNode : tcNode.etherealNodes) {
+                                bPayload = new AssociatedPayload(eNode.ID, tcNode.ID);
+                                send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
+                                        .setPacketType(PacketType.BroadcastAssociateEID).setPacketData(bPayload).timeStamp());
+                            }
                         }
                     }
                     break;

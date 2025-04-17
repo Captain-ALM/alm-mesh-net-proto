@@ -47,6 +47,7 @@ public class Router {
     private final BlockingQueue<NodeUpdate> updates = new LinkedBlockingQueue<>();
 
     protected final Map<String, DataLinkProcessor> dataLinks = new ConcurrentHashMap<>(); //ID to data links;
+    protected final List<DataLinkProcessor> dataLinkList = new CopyOnWriteArrayList<>();
     protected final BlockingQueue<Packet> receiveQueue = new LinkedBlockingQueue<>();
     protected final Thread receiveThread = new Thread(() -> {
         try {
@@ -154,7 +155,11 @@ public class Router {
             resetNextHops();
         } else
             existing.combine(node);
-        dataLinks.put(existing.nodeID, new DataLinkProcessor(transport, existing).start());
+        if (!dataLinks.containsKey(existing.nodeID)) {
+            DataLinkProcessor p = new DataLinkProcessor(transport, existing);
+            dataLinks.put(existing.nodeID, p.start());
+            dataLinkList.add(p);
+        }
     }
 
     /**
@@ -176,7 +181,7 @@ public class Router {
         pkProcessor.terminate();
         receiveThread.interrupt();
         if (shutdownTransports) {
-            for (DataLinkProcessor processor : dataLinks.values())
+            for (DataLinkProcessor processor : dataLinkList)
                 processor.dataLink.close();
         }
     }
@@ -1108,6 +1113,7 @@ public class Router {
                 if (dataLink.isActive())
                     dataLink.close();
                 dataLinks.remove(linkedNode.nodeID);
+                dataLinkList.remove(this);
                 AssociatePayload bPayload = new AssociatePayload(linkedNode.ID);
                 send((BroadcastPacket) new BroadcastPacket(bPayload.getSize()).setSourceAddress(thisNode.ID).setTTL(maxTTL)
                         .setPacketType(PacketType.BroadcastNodeDead).setPacketData(bPayload).timeStamp());

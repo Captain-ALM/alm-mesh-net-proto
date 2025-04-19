@@ -1,6 +1,7 @@
 package com.captainalm.lib.mesh.crypto;
 
 import java.security.GeneralSecurityException;
+import java.util.Random;
 
 /**
  * Provides a key wrapper.
@@ -24,11 +25,11 @@ public interface IWrapper {
     IWrapper setPublicKey(byte[] key);
 
     /**
-     * Wraps the passed key given the signature using the {@link #getPublicKey()}.
+     * produces a shared secret and cipher text using the {@link #getPublicKey()}.
      *
-     * @param keyData The key to wrap.
-     * @return The wrapped key data.
+     * @param rand Random for key generation.
+     * @return An array with the shared secret [0] and the wrapped key data [1].
      * @throws GeneralSecurityException A wrapping issue has occurred.
      */
-    byte[] wrap(byte[] keyData) throws GeneralSecurityException   ;
+    byte[][] wrap(Random rand) throws GeneralSecurityException;
 }

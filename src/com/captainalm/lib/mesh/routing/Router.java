@@ -963,10 +963,10 @@ public class Router {
     }
 
     private byte[] sendEncryptionHandshake(GraphNode target) {
-        byte[] key = new byte[32];
-        random.nextBytes(key);
         try {
-            SinglePayload enchp = new SinglePayload(cryptoProvider.GetWrapperInstance().setPublicKey(target.kemKey).wrap(key));
+            byte[][] data = cryptoProvider.GetWrapperInstance().setPublicKey(target.kemKey).wrap(random);
+            byte[] key = data[0];
+            SinglePayload enchp = new SinglePayload(data[1]);
             target.setEncryptionKey(key, Instant.now().getEpochSecond());
             updates.add(new NodeUpdate(target, false));
             send((BroadcastPacket) new UnicastPacket(enchp.getSize()).setDestinationAddress(target.ID)

@@ -11,9 +11,11 @@ import com.captainalm.lib.mesh.routing.graphing.GraphNode;
 import com.captainalm.lib.mesh.transport.INetTransport;
 
 import java.security.GeneralSecurityException;
+import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -48,7 +50,7 @@ public final class HandshakeProcessor {
 
     private final byte[] kemPrivateKey;
     private final byte[] dsaPrivateKey;
-    private final byte[] myEncKey;
+    private final Random rand = new SecureRandom();
 
     private final BlockingQueue<Exception> errors = new LinkedBlockingQueue<>();
 
@@ -210,12 +212,11 @@ public final class HandshakeProcessor {
      * @param authorizer The peer authorizer.
      * @param kemPrivateKey The ml-kem private key.
      * @param dsaPrivateKey The ml-dsa private key.
-     * @param myEncKey this node's symmetric encryption key.
      * @throws IllegalArgumentException parameter cannot be null
      */
     public HandshakeProcessor(GraphNode local, INetTransport transport, IProvider cryptProvider,
-                              IPeerAuthorizer authorizer, byte[] kemPrivateKey, byte[] dsaPrivateKey, byte[] myEncKey) {
-        if (local == null || transport == null || cryptProvider == null || authorizer == null || kemPrivateKey == null || dsaPrivateKey == null || myEncKey == null)
+                              IPeerAuthorizer authorizer, byte[] kemPrivateKey, byte[] dsaPrivateKey) {
+        if (local == null || transport == null || cryptProvider == null || authorizer == null || kemPrivateKey == null || dsaPrivateKey == null)
             throw new IllegalArgumentException("parameter cannot be null");
         this.local = local;
         this.transport = transport;
@@ -223,7 +224,6 @@ public final class HandshakeProcessor {
         this.authorizer = authorizer;
         this.kemPrivateKey = kemPrivateKey;
         this.dsaPrivateKey = dsaPrivateKey;
-        this.myEncKey = myEncKey;
     }
 
     private void send(PacketData payload, PacketType type, boolean sendSignatures) throws GeneralSecurityException {
@@ -310,7 +310,8 @@ public final class HandshakeProcessor {
         try {
             if (authorizer.authorize(remote.ID, (noRecommendations) ? null : ((SinglePayload) recSigPubPacket.getPacketData(true)).getPayload())) {
                 localAuthorizeSuccess = true;
-                send(new SinglePayload(cProvider.GetWrapperInstance().setPublicKey(remote.kemKey).wrap(myEncKey)), PacketType.DirectHandshakeAccept, true);
+                byte[][] data = cProvider.GetWrapperInstance().setPublicKey(remote.kemKey).wrap(rand);
+                send(new SinglePayload(data[1]), PacketType.DirectHandshakeAccept, true);
             } else
                 send(null, PacketType.DirectHandshakeReject, true);
         } catch (GeneralSecurityException e) {

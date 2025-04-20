@@ -50,7 +50,7 @@ public final class HandshakeProcessor {
 
     private final byte[] kemPrivateKey;
     private final byte[] dsaPrivateKey;
-    private final Random rand = new SecureRandom();
+    private final SecureRandom rand = new SecureRandom();
 
     private final BlockingQueue<Exception> errors = new LinkedBlockingQueue<>();
 

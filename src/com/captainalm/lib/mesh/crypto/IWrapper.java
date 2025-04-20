@@ -1,6 +1,7 @@
 package com.captainalm.lib.mesh.crypto;
 
 import java.security.GeneralSecurityException;
+import java.security.SecureRandom;
 import java.util.Random;
 
 /**
@@ -27,9 +28,9 @@ public interface IWrapper {
     /**
      * produces a shared secret and cipher text using the {@link #getPublicKey()}.
      *
-     * @param rand Random for key generation.
+     * @param rand {@link java.security.SecureRandom} for key generation.
      * @return An array with the shared secret [0] and the wrapped key data [1].
      * @throws GeneralSecurityException A wrapping issue has occurred.
      */
-    byte[][] wrap(Random rand) throws GeneralSecurityException;
+    byte[][] wrap(SecureRandom rand) throws GeneralSecurityException;
 }

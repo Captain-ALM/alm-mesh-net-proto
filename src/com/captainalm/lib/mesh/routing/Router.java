@@ -24,7 +24,7 @@ import java.util.concurrent.*;
  * @author Alfred Manville
  */
 public class Router {
-    protected final Random random = new SecureRandom();
+    protected final SecureRandom random = new SecureRandom();
     protected final IPacketProcessor pkProcessor;
     protected boolean active;
 
@@ -528,8 +528,14 @@ public class Router {
                     if (onionPayload.getLayer() instanceof DataLayer odl) {
                         try {
                             Packet toSend = ((DataLayer) odl.decrypt(cryptoProvider.GetCryptorInstance().setKey(initKey))).getPacket();
-                            if (toSend instanceof BroadcastPacket tsbpk && Arrays.equals(cdNode.ID, tsbpk.getSourceAddress()))
-                                route((BroadcastPacket) toSend);
+                            if (toSend instanceof BroadcastPacket tsbpk && Arrays.equals(cdNode.ID, tsbpk.getSourceAddress())) {
+                                if (toSend.getType() == PacketType.BroadcastAssociateKEMKey || toSend.getType() == PacketType.BroadcastAssociateDSAKey
+                                 && toSend.getPacketData(true) instanceof AssociatedPayload adp &&
+                                Arrays.equals(adp.getAssociateID(), tsbpk.getSourceAddress())) {
+                                    send((BroadcastPacket) tsbpk.setSourceAddress(thisNode.ID).calculateHash(cryptoProvider.GetHasherInstance()));
+                                } else
+                                    route((BroadcastPacket) toSend);
+                            }
                         } catch (GeneralSecurityException e) {
                             errors.add(e);
                         }

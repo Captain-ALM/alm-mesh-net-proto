@@ -106,9 +106,10 @@ public interface ICryptor {
     /**
      * Gets a cipher given the IV.
      *
+     * @param mode The Cipher mode.
      * @param IV The IV to create a cipher of.
      * @return The cipher instance.
      * @throws GeneralSecurityException A Crypto Error Occurred.
      */
-    Cipher getCipher(byte[] IV) throws GeneralSecurityException;
+    Cipher getCipher(int mode ,byte[] IV) throws GeneralSecurityException;
 }

@@ -58,7 +58,7 @@ public final class PacketBytesInputStream implements Closeable {
                 if (n == 16) {
                     upgraded = true;
                     try {
-                        in = new CipherInputStream(in, upgradeCipher.getCipher(IV));
+                        in = new CipherInputStream(in, upgradeCipher.getCipher(Cipher.DECRYPT_MODE, IV));
                     } catch (GeneralSecurityException e) {
                         throw new IOException(e);
                     }

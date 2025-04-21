@@ -57,6 +57,10 @@ public final class HandshakeProcessor {
 
     private boolean localAuthorizeSuccess = false;
 
+    private boolean validData(byte[] data) {
+        return data != null && data.length > 0;
+    }
+
     private final Object lockNotify = new Object();
     private final Thread recvThread = new Thread(new Runnable() {
         @Override
@@ -105,7 +109,8 @@ public final class HandshakeProcessor {
                                 System.arraycopy(cProvider.GetHasherInstance().hash(asdp2.getAssociatedPayload()), 0, ID, 16, 16);
                                 try {
                                     if (Arrays.equals(ID, asdp1.getAssociateID()) && Arrays.equals(ID, sigPayloads[0].getDataHash().readAllBytes())
-                                            && sig.length > 0 && cProvider.GetVerifierInstance().setPublicKey(asdp2.getAssociatedPayload()).verify(ID, sig)) {
+                                            && sig.length > 0 && cProvider.GetVerifierInstance().setPublicKey(asdp2.getAssociatedPayload()).verify(ID, sig)
+                                    && validData(asdp1.getAssociatedPayload()) && validData(asdp2.getAssociatedPayload())) {
                                         // In this case, data hash is the pure ID
                                         remote = new GraphNode(ID);
                                         remote.kemKey = asdp1.getAssociatedPayload();
@@ -214,12 +219,14 @@ public final class HandshakeProcessor {
      * @param kemPrivateKey The ml-kem private key.
      * @param dsaPrivateKey The ml-dsa private key.
      * @param encapsulatedKey The encapsulated symmetric key.
-     * @throws IllegalArgumentException parameter cannot be null
+     * @throws IllegalArgumentException parameter / local keys cannot be null
      */
     public HandshakeProcessor(GraphNode local, INetTransport transport, IProvider cryptProvider,
                               IPeerAuthorizer authorizer, byte[] kemPrivateKey, byte[] dsaPrivateKey, byte[] encapsulatedKey) {
         if (local == null || transport == null || cryptProvider == null || authorizer == null || kemPrivateKey == null || dsaPrivateKey == null || encapsulatedKey == null)
             throw new IllegalArgumentException("parameter cannot be null");
+        if (!validData(local.kemKey) || !validData(local.dsaKey))
+            throw new IllegalArgumentException("local parameter cannot have null keys");
         this.local = local;
         this.transport = transport;
         this.cProvider = cryptProvider;
@@ -288,8 +295,11 @@ public final class HandshakeProcessor {
             return null;
         }
         synchronized (lockNotify) {
-            while (remote == null)
-                lockNotify.wait(timeout);
+            lockNotify.wait(timeout);
+            if (remote == null) {
+                failed = true;
+                return null;
+            }
         }
         try {
         if (publicRecommendKey == null || recommendSignature == null) {
@@ -307,8 +317,11 @@ public final class HandshakeProcessor {
             return null;
         }
         synchronized (lockNotify) {
-            while (remote == null)
-                lockNotify.wait(timeout);
+            lockNotify.wait(timeout);
+            if (noRecommendations == null) {
+                failed = true;
+                return null;
+            }
         }
         try {
             if (authorizer.authorize(remote.ID, (noRecommendations) ? null : ((SinglePayload) recSigPubPacket.getPacketData(true)).getPayload())) {
@@ -322,8 +335,11 @@ public final class HandshakeProcessor {
             return null;
         }
         synchronized (lockNotify) {
-            while (remote == null)
-                lockNotify.wait(timeout);
+            lockNotify.wait(timeout);
+            if (encKey == null) {
+                failed = true;
+                return null;
+            }
         }
         return encKey;
     }

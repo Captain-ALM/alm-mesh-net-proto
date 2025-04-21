@@ -59,6 +59,8 @@ public final class GraphNode {
         System.arraycopy(hProvider.hash(kemKey), 0, this.ID, 0, 16);
         System.arraycopy(hProvider.hash(dsaKey), 0, this.ID, 16, 16);
         this.nodeID = BytesToHex.bytesToHex(this.ID);
+        this.kemKey = kemKey;
+        this.dsaKey = dsaKey;
     }
 
     /**

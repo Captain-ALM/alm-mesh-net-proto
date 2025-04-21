@@ -47,7 +47,9 @@ public final class IntOnStream {
         value %= (256 * 256 * 256);
         out.write((byte) (value / (256 * 256)));
         value %= (256 * 256);
-        WriteShort(out, (short) value);
+        out.write((byte) (value / 256));
+        value %= 256;
+        out.write((byte) value);
     }
 
     /**
@@ -64,12 +66,11 @@ public final class IntOnStream {
         if (value < 0)
             throw new IllegalArgumentException("value less than 0");
         long divs = 256L * 256L * 256L * 256L * 256L * 256L * 256L; // divisor
-        while (divs > 256L * 256L * 256L) {
+        for (int i = 0; i < 8; ++i) {
             out.write((byte) (value / divs));
             value %= divs;
             divs /= 256L;
         }
-        WriteInt(out, (int) value);
     }
 
     static int ReadStream(InputStream in) throws IOException {

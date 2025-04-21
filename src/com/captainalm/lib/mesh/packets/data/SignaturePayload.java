@@ -48,7 +48,7 @@ public class SignaturePayload extends PacketData {
      * @throws IllegalArgumentException dataHash or signatureHash are null.
      */
     public SignaturePayload(byte[] signaturePart, byte partID, byte maxParts, byte[] dataHash, byte[] signatureHash, int signatureLength) {
-        super(66 + ((signaturePart == null) ? 0 : signaturePart.length));
+        super(66 + ((signaturePart == null) ? 0 : signaturePart.length + 4));
         this.data[0] = partID;
         this.data[1] = maxParts;
         if (signatureHash == null)

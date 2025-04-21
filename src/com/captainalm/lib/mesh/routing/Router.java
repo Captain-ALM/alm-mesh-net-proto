@@ -138,6 +138,7 @@ public class Router {
 
     /**
      * Adds a handshaked transport to this router.
+     * Calls {@link INetTransport#close()} on transport if the node has a data link already registered.
      *
      * @param transport The transport to add.
      * @param extraPackets The extra packets from {@link HandshakeProcessor#getOtherPackets()}.
@@ -159,7 +160,8 @@ public class Router {
             DataLinkProcessor p = new DataLinkProcessor(transport, existing);
             dataLinks.put(existing.nodeID, p.start());
             dataLinkList.add(p);
-        }
+        } else
+            transport.close();
     }
 
     /**

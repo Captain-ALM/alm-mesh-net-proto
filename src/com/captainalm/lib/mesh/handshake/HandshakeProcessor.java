@@ -44,6 +44,7 @@ public final class HandshakeProcessor {
     private Boolean noRecommendations = null;
     private boolean recommendProcessed = false;
     private byte[] encKey;
+    private final byte[] myEncapsulatedKeyToSend;
 
     private final GraphNode local;
     private GraphNode remote;
@@ -204,7 +205,7 @@ public final class HandshakeProcessor {
 
     /**
      * Constructs a new instance of HandshakeProcessor with the specified local node imformation,
-     * transport, cryptographic provider, authorizer and private keys.
+     * transport, cryptographic provider, authorizer, private keys and an encapsulated symmetric key.
      *
      * @param local The local node.
      * @param transport The transport.
@@ -212,11 +213,12 @@ public final class HandshakeProcessor {
      * @param authorizer The peer authorizer.
      * @param kemPrivateKey The ml-kem private key.
      * @param dsaPrivateKey The ml-dsa private key.
+     * @param encapsulatedKey The encapsulated symmetric key.
      * @throws IllegalArgumentException parameter cannot be null
      */
     public HandshakeProcessor(GraphNode local, INetTransport transport, IProvider cryptProvider,
-                              IPeerAuthorizer authorizer, byte[] kemPrivateKey, byte[] dsaPrivateKey) {
-        if (local == null || transport == null || cryptProvider == null || authorizer == null || kemPrivateKey == null || dsaPrivateKey == null)
+                              IPeerAuthorizer authorizer, byte[] kemPrivateKey, byte[] dsaPrivateKey, byte[] encapsulatedKey) {
+        if (local == null || transport == null || cryptProvider == null || authorizer == null || kemPrivateKey == null || dsaPrivateKey == null || encapsulatedKey == null)
             throw new IllegalArgumentException("parameter cannot be null");
         this.local = local;
         this.transport = transport;
@@ -224,6 +226,7 @@ public final class HandshakeProcessor {
         this.authorizer = authorizer;
         this.kemPrivateKey = kemPrivateKey;
         this.dsaPrivateKey = dsaPrivateKey;
+        this.myEncapsulatedKeyToSend = encapsulatedKey;
     }
 
     private void send(PacketData payload, PacketType type, boolean sendSignatures) throws GeneralSecurityException {
@@ -310,8 +313,7 @@ public final class HandshakeProcessor {
         try {
             if (authorizer.authorize(remote.ID, (noRecommendations) ? null : ((SinglePayload) recSigPubPacket.getPacketData(true)).getPayload())) {
                 localAuthorizeSuccess = true;
-                byte[][] data = cProvider.GetWrapperInstance().setPublicKey(remote.kemKey).wrap(rand);
-                send(new SinglePayload(data[1]), PacketType.DirectHandshakeAccept, true);
+                send(new SinglePayload(myEncapsulatedKeyToSend), PacketType.DirectHandshakeAccept, true);
             } else
                 send(null, PacketType.DirectHandshakeReject, true);
         } catch (GeneralSecurityException e) {

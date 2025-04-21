@@ -1,5 +1,6 @@
 package com.captainalm.lib.mesh.crypto;
 
+import javax.crypto.Cipher;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -101,4 +102,13 @@ public interface ICryptor {
      * @throws GeneralSecurityException A Crypto Error Occurred.
      */
     void decryptStream(InputStream in, OutputStream out) throws IOException, GeneralSecurityException;
+
+    /**
+     * Gets a cipher given the IV.
+     *
+     * @param IV The IV to create a cipher of.
+     * @return The cipher instance.
+     * @throws GeneralSecurityException A Crypto Error Occurred.
+     */
+    Cipher getCipher(byte[] IV) throws GeneralSecurityException;
 }

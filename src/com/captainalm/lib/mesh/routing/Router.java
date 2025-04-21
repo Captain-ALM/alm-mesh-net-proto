@@ -132,6 +132,7 @@ public class Router {
             cStore = cStore.nextFreeStore;;
         }
         active = true;
+        pkProcessor.obtainRouter(this);
         receiveThread.setDaemon(true);
         receiveThread.start();
     }

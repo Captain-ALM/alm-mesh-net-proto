@@ -1,14 +1,18 @@
 package com.captainalm.lib.mesh.packets;
 
+import com.captainalm.lib.mesh.crypto.ICryptor;
 import com.captainalm.lib.mesh.utils.ByteBufferOverwriteOutputStream;
 import com.captainalm.lib.mesh.utils.InputStreamTransfer;
 import com.captainalm.lib.mesh.utils.IntOnStream;
 import com.captainalm.lib.mesh.utils.LengthClampedInputStream;
 
+import javax.crypto.Cipher;
+import javax.crypto.CipherInputStream;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.GeneralSecurityException;
 
 /**
  * Provides obtaining packet bytes from an {@link InputStream}.
@@ -16,9 +20,15 @@ import java.io.InputStream;
  * @author Alfred Manville
  */
 public final class PacketBytesInputStream implements Closeable {
-    private final InputStream in;
+    private InputStream in;
     private final byte[] readHeader = new byte[2];
     private byte[] buffer;
+    private boolean upgraded = false;
+    private boolean nextReadUpgrades = false;
+    /**
+     * If set allows for auto stream upgrades to {@link javax.crypto.CipherInputStream}.
+     */
+    public ICryptor upgradeCipher;
 
     /**
      * Constructs a new PacketBytesInputStream with the specified input stream.
@@ -40,18 +50,45 @@ public final class PacketBytesInputStream implements Closeable {
      * @throws IOException An I/O error has occurred.
      */
     public byte[] readNext() throws IOException {
+        if (nextReadUpgrades) {
+            nextReadUpgrades = false;
+            if (upgradeCipher != null) {
+                byte[] IV = new byte[16];
+                int n = in.read(IV);
+                if (n == 16) {
+                    upgraded = true;
+                    try {
+                        in = new CipherInputStream(in, upgradeCipher.getCipher(IV));
+                    } catch (GeneralSecurityException e) {
+                        throw new IOException(e);
+                    }
+                } else
+                    throw new EOFException();
+            }
+        }
         int read = in.read(readHeader);
         if (read != 2) {
             in.close();
             throw new EOFException();
         }
+        if (readHeader[1] == PacketType.DirectHandshakeAccept.getID() && !upgraded)
+            nextReadUpgrades = true;
         short sz = IntOnStream.ReadShort(in);
-        buffer = new byte[sz + 4];
+        buffer = new byte[sz + 4 + 32];
         ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(buffer, 0, buffer.length);
         ovrw.write(readHeader);
         IntOnStream.WriteShort(ovrw, sz);
-        InputStreamTransfer.streamTransfer(new LengthClampedInputStream(in, sz), ovrw);
+        InputStreamTransfer.streamTransfer(new LengthClampedInputStream(in, sz + 32), ovrw);
         return buffer;
+    }
+
+    /**
+     * Gets if the internal {@link InputStream} has been wrapped with an {@link CipherInputStream}.
+     *
+     * @return If the stream has been upgraded.
+     */
+    public boolean isUpgraded() {
+        return upgraded || nextReadUpgrades;
     }
 
     /**

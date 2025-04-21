@@ -242,6 +242,8 @@ public class Packet {
      * @return The size of the payload.
      */
     public int getPayloadSize() {
+        if (data == null || data.length < 4)
+            return 0;
         if (length == null)
             length = (short) (data[2] * 256 + data[3]);
         return length;
@@ -253,9 +255,9 @@ public class Packet {
      * @return The size of the packet.
      */
     public int getPacketSize() {
-        if (length == null)
+        if (data == null || data.length < 36)
             return 0;
-        return data.length;
+        return 4 + getPayloadSize() + 32;
     }
 
     /**

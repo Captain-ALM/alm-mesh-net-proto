@@ -82,6 +82,17 @@ public final class PacketBytesInputStream implements Closeable {
         return buffer;
     }
 
+    public String getBufferMetaString() {
+        if (buffer == null || buffer.length < 4) {
+            return ((readHeader[0] < 0) ? (int) readHeader[0] + 128 : readHeader[0]) + ","
+                    + ((readHeader[1] < 0) ? (int) readHeader[1] + 128 : readHeader[1]);
+        }
+        return ((buffer[0] < 0) ? (int) buffer[0] + 128 : buffer[0]) + ","
+                + ((buffer[1] < 0) ? (int) buffer[1] + 128 : buffer[1]) + ","
+                + ((buffer[2] < 0) ? (int) buffer[2] + 128 : buffer[2]) + ","
+                + ((buffer[3] < 0) ? (int) buffer[3] + 128 : buffer[3]);
+    }
+
     /**
      * Gets if the internal {@link InputStream} has been wrapped with an {@link CipherInputStream}.
      *

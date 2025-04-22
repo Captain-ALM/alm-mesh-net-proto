@@ -10,6 +10,8 @@ import com.captainalm.lib.mesh.transport.INetTransport;
 import com.captainalm.lib.mesh.utils.BytesToHex;
 import com.captainalm.lib.mesh.utils.IP;
 
+import java.nio.channels.ScatteringByteChannel;
+
 /**
  * Provides a {@link IPacketProcessor} to interface with {@link INetTransport}.
  *
@@ -22,23 +24,27 @@ public final class NetTransportProcessor implements IPacketProcessor {
     private final Thread recvThread = new Thread(new Runnable() {
         public void run() {
             while (transport.isActive()) {
-                byte[] data = transport.receive();
-                if (data == null)
-                    return;
-                byte[] dest = IP.extractDestinationAddress(data);
-                byte[] srcID = router.getThisNodeID();
-                boolean remote = false;
-                if (IP.getVersion(data[0]) == 4) {
-                    remote = dest[0] != 10;
-                } else if (IP.getVersion(data[0]) == 6) {
-                    remote = dest[0] != (byte) 253 || dest[1] != (byte) 10;
-                }
-                byte[] dstID = (remote ? router.getGatewayNodeID() : router.getNodeID(BytesToHex.bytesToHex(dest)));
-                if (dstID != null) {
-                    PacketData payload = (remote ? new DataAddressedPayload(data, false) : new DataPayload(data));
-                    router.send((UnicastPacket) new UnicastPacket(payload.getSize()).setDestinationAddress(dstID).setSourceAddress(srcID)
-                            .setPacketType((remote) ? PacketType.UnicastDataAddressed : PacketType.UnicastData)
-                            .setPacketData(payload).timeStamp());
+                try {
+                    byte[] data = transport.receive();
+                    if (data == null)
+                        return;
+                    byte[] dest = IP.extractDestinationAddress(data);
+                    byte[] srcID = router.getThisNodeID();
+                    boolean remote = false;
+                    if (IP.getVersion(data[0]) == 4) {
+                        remote = dest[0] != 10;
+                    } else if (IP.getVersion(data[0]) == 6) {
+                        remote = dest[0] != (byte) 253 || dest[1] != (byte) 10;
+                    }
+                    byte[] dstID = (remote ? router.getGatewayNodeID() : router.getNodeID(BytesToHex.bytesToHex(dest)));
+                    if (dstID != null) {
+                        PacketData payload = (remote ? new DataAddressedPayload(data, false) : new DataPayload(data));
+                        router.send((UnicastPacket) new UnicastPacket(payload.getSize()).setDestinationAddress(dstID).setSourceAddress(srcID)
+                                .setPacketType((remote) ? PacketType.UnicastDataAddressed : PacketType.UnicastData)
+                                .setPacketData(payload).timeStamp());
+                    }
+                } catch (Exception e) {
+                    router.addException(e);
                 }
             }
         }

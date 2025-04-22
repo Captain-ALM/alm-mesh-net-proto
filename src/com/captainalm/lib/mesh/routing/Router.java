@@ -137,6 +137,10 @@ public class Router {
         receiveThread.start();
     }
 
+    void addException(Exception e) {
+        errors.add(e);
+    }
+
     /**
      * Adds a handshaked transport to this router.
      * Calls {@link INetTransport#close()} on transport if the node has a data link already registered.

@@ -84,13 +84,15 @@ public final class PacketBytesInputStream implements Closeable {
 
     public String getBufferMetaString() {
         if (buffer == null || buffer.length < 4) {
-            return ((readHeader[0] < 0) ? (int) readHeader[0] + 128 : readHeader[0]) + ","
-                    + ((readHeader[1] < 0) ? (int) readHeader[1] + 128 : readHeader[1]);
+            return ((readHeader[0] < 0) ? (int) readHeader[0] + 256 : readHeader[0]) + ","
+                    + ((readHeader[1] < 0) ? (int) readHeader[1] + 256 : readHeader[1]);
         }
-        return ((buffer[0] < 0) ? (int) buffer[0] + 128 : buffer[0]) + ","
-                + ((buffer[1] < 0) ? (int) buffer[1] + 128 : buffer[1]) + ","
-                + ((buffer[2] < 0) ? (int) buffer[2] + 128 : buffer[2]) + ","
-                + ((buffer[3] < 0) ? (int) buffer[3] + 128 : buffer[3]);
+        String toret = "";
+        for (int i = 0; i < Math.min(12,buffer.length); i++)
+            toret += ((buffer[i] < 0) ? (int) buffer[i] + 256 : buffer[i]) + ",";
+        if (toret.isEmpty())
+            return "";
+        return toret.substring(0, toret.length() - 1);
     }
 
     /**

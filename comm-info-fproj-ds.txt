@@ -1,0 +1,92 @@
+Store Struct:
+  - *packetData
+  - *packetSignature (Fixed Size)
+  - *packetSignatureParts (Fixed Size, boolean array)
+  - *packetHash (Fixed Size)
+  - *signatureHash (Fixed Size)
+  - *newerStore
+  - *nextStore (Free list)
+
+HashMap<{packetHash}*,Struct> Added when part received;
+if full (Free list pointer empty), remove oldest (Get from pointer stored) && replace data of Struct with received data + add to map;
+else, pop free list head and replace data of Struct with received data + add to map;
+
+Nodes create a cache of nextNode[target] = node to navigate to from current via Prim's Algorithm; invalidated when graph updated
+
+Processing packets is done on transport thread + synclock protection for packet charging
+Routing is done on transport thread + synclock protection for route table
+Receive is done on a single thread dequeuing
+
+Packets:
+Data
+SignatureHalf1
+SignatureHalf2
+
+All have SHA256 hash of Packet (Data packet excluding TTL, the hash itself and the signature hash) and Signature
+Signature packets also have a SHA256 hash of Packet (Excluding TTL and the hash itself)
+
+Packets identify sender and target nodes, where node IDs are the SHA256 of {public signature key + public key wrap key}*
+
+IP addresses
+Clear from packet headers to save data? (And place back on other end)
+First 3 bytes for IPv4 from the node ID (10.0.0.0/8)
+Last 6 bytes for the IPv6 from the node ID (fd0a::/16)
+
+Structure:
+TTL{1},ID{1},PAYLOADSIZE{2},TSTAMP{8},[1]...,DATA{PAYLOADSIZE},HASH{32}
+Unicast/Broadcast only->[1] = SENDER{32},[2]...
+Unicast only->[2] = RECEIVER{32},IV{16}
+Hash = SHA256 of packet data excluding itself and the TTL if present
+
+Types:
+
+Direct:
+#HndShk KEM Key {1184 Byte}:KEMKEY {32 Byte}:IDHASH
+#HndShk DSA Key {1312 Byte}:DSAKEY {32 Byte}:IDHASH
+#HndShk ID SIG {1 Byte}:FRAGN {1 Byte}:FRAGC {32 Byte}:SIGHASH {32 Byte}:IDHASH {4 Byte}:PKTDSASIG_FLEN {1210 Byte}:PKTDSASIG
+#HndShk RECM DSA Key {1312 Byte}:DSAKEY
+#HndShk RECM SIG {1 Byte}:FRAGN {1 Byte}:FRAGC {32 Byte}:SIGHASH {32 Byte}:IDHASH {4 Byte}:PKTDSASIG_FLEN {1210 Byte}:PKTDSASIG
+#HndShk Accept (EncU KEM of remote) {1088 Byte}:ENCKEY
+~HndShk Reject
+#HndShk Signature {1 Byte}:FRAGN {1 Byte}:FRAGC {32 Byte}:PKTHASH {32 Byte}:SIGHASH {4 Byte}:PKTDSASIG_FLEN {1210 Byte}:PKTDSASIG
+#Graphing [{32 Byte}:NODEID {2 Byte}:CONNODEC [{32 Byte}:CONNODE]+{CONNODEC}]+
+#NodesEID [{32 Byte}:OWNERNODEID {2 Byte}:EIDNODEC [{32 Byte}:EIDNODE]+{EIDNODEC}]+
+~HndShk RECM NONE
+~Gateway Available
+#Signature {1 Byte}:FRAGN {1 Byte}:FRAGC {32 Byte}:PKTHASH {32 Byte}:SIGHASH {4 Byte}:PKTDSASIG_FLEN {1210 Byte}:PKTDSASIG
+
+^ All HandShk *... Packets are non-transport encrypted
+
+Unicast:
+#Data Packet {? Byte}:IP
+#Data Packet Addressed {? Byte}:IP {16 Byte}:Address
+#Onion Packet {16 Byte}:ID {? Byte}:Layer
+#Encryption Request HndShk (EncU KEM of remote) {1088 Byte}:ENCKEY
+#Encryption Response HndShk (EncU AES of local) {32 Byte}:ENCKEY
+~Encryption Response HndShk Failed
+#Onion Circuit Create (EncU KEM of remote) {1088 Byte}:ENCKEY {16 Byte}:RID
+#Onion Circuit Create Endpoint (EncU KEM of remote) {1088 Byte}:ENCKEY {32 Byte}:EID {16 Byte}:RID
+#Onion Circuit Created (EncU AES of local for ID) {32 Byte}:ENCKEY {16 Byte}:ID {16 Byte}:RID
+#Onion Circuit Denied {16 Byte}:RID
+#Onion Circuit Broken {16 Byte}:ID
+#Signature {1 Byte}:FRAGN {1 Byte}:FRAGC {32 Byte}:PKTHASH {32 Byte}:SIGHASH {4 Byte}:PKTDSASIG_FLEN {1210 Byte}:PKTDSASIG
+^ All unicast packets have an encrypted variant (Excluding Encryption * HndShk && Signature); set the top bit in the packet ID
+
+Broadcast:
+#Gateway [{32 Byte}:NODEID]+
+#Graphing [{32 Byte}:NODEID {2 Byte}:CONNODEC [{32 Byte}:CONNODE]+{CONNODEC}]+
+#Node Dead {32 Byte}:NODEID
+#Associate EID {32 Byte}:EID {32 Byte}:OWNERID
+#Associate KEM Key {32 Byte}:ID {1184 Byte}:KEMKEY
+#Associate DSA Key {32 Byte}:ID {1312 Byte}:DSAKEY
+#De-Associate EID {32 Byte}:EID
+#Signature {1 Byte}:FRAGN {1 Byte}:FRAGC {32 Byte}:PKTHASH {32 Byte}:SIGHASH {4 Byte}:PKTDSASIG_FLEN {1210 Byte}:PKTDSASIG
+
+#Layered:
+#Structure:
+#ID{1},OID{16},IV{16},[1/2]
+#Onion Packet == ID->[1] = ENCRYPTED_LAYER
+#* /= Onion Packet == ID->[2] = ENNCRYPTED[UNICAST SPECIFIC REST HEADER + DATA FOR PACKET BY ID]
+
+Encryption, store IV; IV must start with a non 0 byte otherwise it is considered decrypted; generating an IV makes sure the first byte is not a 0 byte
+For transport packets, there is a choice between supporting an IV and not depending on if it is a stream cipher with an integerated IV

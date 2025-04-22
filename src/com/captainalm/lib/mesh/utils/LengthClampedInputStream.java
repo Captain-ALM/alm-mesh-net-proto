@@ -14,7 +14,7 @@ import java.io.InputStream;
  */
 public class LengthClampedInputStream extends FilterInputStream {
     protected boolean closed;
-    protected int clampedLength;
+    protected long clampedLength;
     protected int markReadLimit;
     protected int markResetLength;
 
@@ -27,7 +27,7 @@ public class LengthClampedInputStream extends FilterInputStream {
      * @throws NullPointerException inputStream is null.
      * @throws IllegalArgumentException length is less than 0.
      */
-    public LengthClampedInputStream(InputStream inputStream, int length) {
+    public LengthClampedInputStream(InputStream inputStream, long length) {
         super(inputStream);
         if (inputStream == null) throw new NullPointerException("inputStream is null");
         if (length < 0) throw new IllegalArgumentException("length is less than 0");
@@ -55,6 +55,29 @@ public class LengthClampedInputStream extends FilterInputStream {
         return super.read();
     }
 
+    @Override
+    public int read(byte[] b, int off, int len) throws IOException {
+        if (closed) throw new IOException("stream closed");
+        if (clampedLength < 1)
+            return -1;
+        int lena = Math.min(len, positiveInt(clampedLength));
+        clampedLength -= lena;
+        return super.read(b, off, lena);
+    }
+
+    private int positiveInt(long value) {
+        if (value > Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        return (int) value;
+    }
+
+    @Override
+    public long skip(long n) throws IOException {
+        if (closed) throw new IOException("stream closed");
+        long len = Math.min(n, clampedLength);
+        clampedLength -= len;
+        return super.skip(len);
+    }
+
     protected synchronized void decrementMarkResetLength() {
         if (markResetLength >= 0) markResetLength--;
     }
@@ -73,7 +96,7 @@ public class LengthClampedInputStream extends FilterInputStream {
     @Override
     public int available() throws IOException {
         if (closed) throw new IOException("stream closed");
-        return Math.min(super.available(), clampedLength);
+        return Math.min(super.available(), positiveInt(clampedLength));
     }
 
     /**

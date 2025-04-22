@@ -25,6 +25,9 @@ public final class PacketBytesInputStream implements Closeable {
     private byte[] buffer;
     private boolean upgraded = false;
     private boolean nextReadUpgrades = false;
+    private static final Packet pk = new Packet(0);
+    private static final Packet bpk = new BroadcastPacket(0);
+    private static final Packet upk = new UnicastPacket(0);
     /**
      * If set allows for auto stream upgrades to {@link javax.crypto.CipherInputStream}.
      */
@@ -71,14 +74,22 @@ public final class PacketBytesInputStream implements Closeable {
             in.close();
             throw new EOFException();
         }
-        if (readHeader[1] == PacketType.DirectHandshakeAccept.getID() && !upgraded)
+        PacketType pt = PacketType.fromID(readHeader[1]);
+        if (pt == PacketType.DirectHandshakeAccept && !upgraded)
             nextReadUpgrades = true;
+        int headSize;
+        if (pt.getMessagingType() == PacketMessagingType.Broadcast)
+            headSize = bpk.getPacketDataStartIndex();
+        else if (pt.getMessagingType() == PacketMessagingType.Unicast)
+            headSize = upk.getPacketDataStartIndex();
+        else
+            headSize = pk.getPacketDataStartIndex();
         short sz = IntOnStream.ReadShort(in);
-        buffer = new byte[sz + 4 + 32];
+        buffer = new byte[sz + headSize + 32];
         ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(buffer, 0, buffer.length);
         ovrw.write(readHeader);
         IntOnStream.WriteShort(ovrw, sz);
-        InputStreamTransfer.streamTransfer(new LengthClampedInputStream(in, sz + 32), ovrw);
+        InputStreamTransfer.streamTransfer(new LengthClampedInputStream(in, headSize - 4 + sz + 32), ovrw);
         return buffer;
     }
 

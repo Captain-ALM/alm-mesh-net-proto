@@ -54,7 +54,7 @@ public final class PacketBytesInputStream implements Closeable {
             nextReadUpgrades = false;
             if (upgradeCipher != null) {
                 byte[] IV = new byte[16];
-                int n = in.read(IV);
+                int n = InputStreamTransfer.readAllBytes(in,IV);
                 if (n == 16) {
                     upgraded = true;
                     try {
@@ -66,7 +66,7 @@ public final class PacketBytesInputStream implements Closeable {
                     throw new EOFException();
             }
         }
-        int read = in.read(readHeader);
+        int read = InputStreamTransfer.readAllBytes(in, readHeader);
         if (read != 2) {
             in.close();
             throw new EOFException();

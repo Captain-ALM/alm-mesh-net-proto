@@ -30,4 +30,25 @@ public final class InputStreamTransfer {
         } catch (EOFException ignored) {
         }
     }
+
+    /**
+     * Tries to read all the bytes from a stream until it reaches an EOF.
+     *
+     * @param inputStream The input stream to read from.
+     * @return The number of bytes manged to read.
+     * @throws IOException An I/O Exception has occured.
+     */
+    public static int readAllBytes(InputStream inputStream, byte[] bytes) throws IOException {
+        if (inputStream == null || bytes == null)
+            return 0;
+        int pos = 0;
+        try {
+            while (pos < bytes.length) {
+                int bytesRead = inputStream.read(bytes, pos, bytes.length - pos);
+                pos += bytesRead;
+            }
+        } catch (EOFException ignored) {
+        }
+        return pos;
+    }
 }

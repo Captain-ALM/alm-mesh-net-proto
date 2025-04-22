@@ -123,7 +123,7 @@ public class Packet {
                 return new SinglePayload(this);
             }
             case DirectSignature, DirectHandshakeIDSignature, DirectHandshakeDSARecommendationSignature,
-                 BroadcastSignature,UnicastSignature-> {
+                 BroadcastSignature,UnicastSignature, DirectHandshakeSignature-> {
                 return new SignaturePayload(this);
             }
             case UnicastOnion -> {
@@ -245,7 +245,7 @@ public class Packet {
         if (data == null || data.length < 4)
             return 0;
         if (length == null)
-            length = (short) (data[2] * 256 + data[3]);
+            length = (short) (Byte.toUnsignedInt(data[2]) * 256 + Byte.toUnsignedInt(data[3]));
         return length;
     }
 
@@ -405,17 +405,17 @@ public class Packet {
         for (int i = 0; i < sPayloads.length; i++) {
             switch (mT) {
                 case Direct -> {
-                    toReturn[i] = new Packet(Packet.MIN_SIZE + sPayloads[i].getSize()).
+                    toReturn[i] = new Packet(sPayloads[i].getSize()).
                             setPacketType(PacketType.DirectSignature).setTTL(
                                     (byte) 0).setPacketData(sPayloads[i]).timeStamp();
                 }
                 case Broadcast -> {
-                    toReturn[i] = new BroadcastPacket(BroadcastPacket.MIN_SIZE + sPayloads[i].getSize()).setSourceAddress(sAddr).
+                    toReturn[i] = new BroadcastPacket(sPayloads[i].getSize()).setSourceAddress(sAddr).
                             setPacketType(PacketType.BroadcastSignature).setTTL(
                                     (byte) 254).setPacketData(sPayloads[i]).timeStamp();
                 }
                 case Unicast -> {
-                    toReturn[i] = new UnicastPacket(UnicastPacket.MIN_SIZE + sPayloads[i].getSize()).setDestinationAddress(dAddr).setSourceAddress(sAddr).
+                    toReturn[i] = new UnicastPacket(sPayloads[i].getSize()).setDestinationAddress(dAddr).setSourceAddress(sAddr).
                             setPacketType(PacketType.UnicastSignature).setTTL(
                                     (byte) 254).setPacketData(sPayloads[i]).timeStamp();
                 }

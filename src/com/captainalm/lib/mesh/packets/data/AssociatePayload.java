@@ -43,7 +43,7 @@ public class AssociatePayload extends PacketData {
     public byte[] getAssociateID() {
         if (associateID == null && dataSize > 31) {
             associateID = new byte[32];
-            System.arraycopy(data, dataStartIndex, associateID, 0, dataSize);
+            System.arraycopy(data, dataStartIndex, associateID, 0, 32);
         }
         return associateID;
     }

@@ -55,7 +55,7 @@ public final class PacketBytesInputStream implements Closeable {
     public byte[] readNext() throws IOException {
         if (nextReadUpgrades) {
             nextReadUpgrades = false;
-            if (upgradeCipher != null) {
+            if (upgradeCipher != null && !upgraded) {
                 byte[] IV = new byte[16];
                 int n = InputStreamTransfer.readAllBytes(in,IV);
                 if (n == 16) {
@@ -75,8 +75,6 @@ public final class PacketBytesInputStream implements Closeable {
             throw new EOFException();
         }
         PacketType pt = PacketType.fromID(readHeader[1]);
-        if (pt == PacketType.DirectHandshakeAccept && !upgraded)
-            nextReadUpgrades = true;
         int headSize;
         if (pt.getMessagingType() == PacketMessagingType.Broadcast)
             headSize = bpk.getPacketDataStartIndex();
@@ -93,6 +91,11 @@ public final class PacketBytesInputStream implements Closeable {
         return buffer;
     }
 
+    /**
+     * Gets the meta-data of the buffer.
+     *
+     * @return The header bytes.
+     */
     public String getBufferMetaString() {
         if (buffer == null || buffer.length < 4) {
             return ((readHeader[0] < 0) ? (int) readHeader[0] + 256 : readHeader[0]) + ","
@@ -104,6 +107,14 @@ public final class PacketBytesInputStream implements Closeable {
         if (toret.isEmpty())
             return "";
         return toret.substring(0, toret.length() - 1);
+    }
+
+    /**
+     * Triggers an upgrade on the next read.
+     */
+    public void upgrade() {
+        if (!upgraded)
+            nextReadUpgrades = true;
     }
 
     /**

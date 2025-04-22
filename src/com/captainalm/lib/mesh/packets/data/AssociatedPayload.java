@@ -73,7 +73,7 @@ public class AssociatedPayload extends AssociatePayload {
     public byte[] getAssociatedPayload() {
         if (associatedPayload == null && dataSize > 31) {
             associatedPayload = new byte[dataSize - 32];
-            System.arraycopy(data, dataStartIndex + 32, associatedPayload, 0, dataSize);
+            System.arraycopy(data, dataStartIndex + 32, associatedPayload, 0, dataSize - 32);
         }
         return associatedPayload;
     }
@@ -88,7 +88,7 @@ public class AssociatedPayload extends AssociatePayload {
         if (payload == null || payload.length != dataSize-32)
             throw new IllegalArgumentException("payload null or size does not match");
         this.associatedPayload = payload;
-        System.arraycopy(payload, 0, data, dataStartIndex+32, dataSize);
+        System.arraycopy(payload, 0, data, dataStartIndex+32, dataSize-32);
     }
 
     /**
@@ -97,7 +97,7 @@ public class AssociatedPayload extends AssociatePayload {
      * @return The stream.
      */
     public ByteArrayInputStream getAssociatedPayloadStream() {
-        return new ByteArrayInputStream(data, dataStartIndex+32, dataSize);
+        return new ByteArrayInputStream(data, dataStartIndex+32, dataSize-32);
     }
 
     /**
@@ -106,6 +106,6 @@ public class AssociatedPayload extends AssociatePayload {
      * @return The stream.
      */
     public ByteBufferOverwriteOutputStream getAssociatedPayloadWritingStream() {
-        return new ByteBufferOverwriteOutputStream(data, dataStartIndex+32, dataSize);
+        return new ByteBufferOverwriteOutputStream(data, dataStartIndex+32, dataSize-32);
     }
 }

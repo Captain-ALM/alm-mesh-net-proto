@@ -19,6 +19,8 @@ import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import static com.captainalm.lib.mesh.utils.InputStreamTransfer.readAllBytes;
+
 /**
  * Provides a way of handshaking two transports before routing commences.
  *
@@ -99,7 +101,7 @@ public final class HandshakeProcessor {
                             }
                             if (bail)
                                 continue;
-                            byte[] sig = SignaturePayload.getSignatureFromFragments(sigPayloads, sigPayloads[0].getSignatureHash().readAllBytes(), cProvider.GetHasherInstance());
+                            byte[] sig = SignaturePayload.getSignatureFromFragments(sigPayloads, readAllBytes(sigPayloads[0].getSignatureHash()), cProvider.GetHasherInstance());
                             if (kemPacket.getPacketData(true) instanceof AssociatedPayload asdp1
                                     && dsaPacket.getPacketData(true) instanceof AssociatedPayload asdp2
                                     && Arrays.equals(asdp1.getAssociateID(), asdp2.getAssociateID())) {
@@ -108,7 +110,7 @@ public final class HandshakeProcessor {
                                 System.arraycopy(cProvider.GetHasherInstance().hash(asdp1.getAssociatedPayload()), 0, ID, 0, 16);
                                 System.arraycopy(cProvider.GetHasherInstance().hash(asdp2.getAssociatedPayload()), 0, ID, 16, 16);
                                 try {
-                                    if (Arrays.equals(ID, asdp1.getAssociateID()) && Arrays.equals(ID, sigPayloads[0].getDataHash().readAllBytes())
+                                    if (Arrays.equals(ID, asdp1.getAssociateID()) && Arrays.equals(ID, readAllBytes(sigPayloads[0].getDataHash()))
                                             && sig.length > 0 && cProvider.GetVerifierInstance().setPublicKey(asdp2.getAssociatedPayload()).verify(ID, sig)
                                     && validData(asdp1.getAssociatedPayload()) && validData(asdp2.getAssociatedPayload())) {
                                         // In this case, data hash is the pure ID
@@ -142,9 +144,9 @@ public final class HandshakeProcessor {
                                 }
                                 if (bail)
                                     continue;
-                                byte[] sig2 = SignaturePayload.getSignatureFromFragments(recSigPayloads, recSigPayloads[0].getSignatureHash().readAllBytes(), cProvider.GetHasherInstance());
+                                byte[] sig2 = SignaturePayload.getSignatureFromFragments(recSigPayloads, readAllBytes(recSigPayloads[0].getSignatureHash()), cProvider.GetHasherInstance());
                                 try {
-                                    if (Arrays.equals(remote.ID, recSigPayloads[0].getDataHash().readAllBytes())
+                                    if (Arrays.equals(remote.ID, readAllBytes(recSigPayloads[0].getDataHash()))
                                             && sig2.length > 0 && recSigPubPacket.getPacketData(true) instanceof SinglePayload sp
                                             && cProvider.GetVerifierInstance().setPublicKey(sp.getPayload()).verify(remote.ID, sig2)) {
                                         noRecommendations = false;
@@ -170,12 +172,13 @@ public final class HandshakeProcessor {
                             }
                             if (bail)
                                 continue;
-                            byte[] sig = SignaturePayload.getSignatureFromFragments(finalSigPayloads, finalSigPayloads[0].getSignatureHash().readAllBytes(), cProvider.GetHasherInstance());
+                            byte[] sig = SignaturePayload.getSignatureFromFragments(finalSigPayloads, readAllBytes(finalSigPayloads[0].getSignatureHash()), cProvider.GetHasherInstance());
                             try {
-                                if (Arrays.equals(finalPacket.getHash(), finalSigPayloads[0].getDataHash().readAllBytes()) &&
+                                if (Arrays.equals(finalPacket.getHash(), readAllBytes(finalSigPayloads[0].getDataHash())) &&
                                         sig.length > 0 && cProvider.GetVerifierInstance().setPublicKey(remote.dsaKey).verify(finalPacket.getHash(), sig)) {
                                     if (finalPacket.getType() == PacketType.DirectHandshakeAccept && finalPacket.getPacketData(true) instanceof SinglePayload sp) {
                                         encKey = cProvider.GetUnwrapperInstance().setPrivateKey(kemPrivateKey).unwrap(sp.getPayload());
+                                        transport.upgrade(encKey);
                                     } else {
                                         failed = true;
                                     }
@@ -202,7 +205,7 @@ public final class HandshakeProcessor {
         if (pk.getPacketData(true) instanceof SignaturePayload sigp) {
             if (sigPks == null)
                 sigPks = new SignaturePayload[sigp.getMaxParts()];
-            else if (sigp.getPartID() < sigPks.length)
+            if (sigp.getPartID() < sigPks.length)
                 sigPks[sigp.getPartID()] = sigp;
         }
         return sigPks;

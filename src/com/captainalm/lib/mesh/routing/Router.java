@@ -18,6 +18,8 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 
+import static com.captainalm.lib.mesh.utils.InputStreamTransfer.readAllBytes;
+
 /**
  * Provides a router class.
  *
@@ -427,7 +429,7 @@ public class Router {
         if (packet.getType() == PacketType.UnicastOnionCircuitBroken && packet.getPacketData(true) instanceof SinglePayload sp)
             deleteCircuit(sp.getPayload());
         else if (packet.getType() == PacketType.UnicastOnionCircuitCreated && packet.getPacketData(true) instanceof  CircuitCreatedPayload crtdp) {
-            byte[] nid = crtdp.getNonceStream().readAllBytes();
+            byte[] nid = readAllBytes(crtdp.getNonceStream());
             String oCID = nIDtoOnionCircuitID.remove(BytesToHex.bytesToHex(nid));
             if (oCID != null) {
                 removeNID(nid);
@@ -519,7 +521,7 @@ public class Router {
                     removeNode(eReg);
             }
             if (reject) {
-                SinglePayload rccpl = new SinglePayload(ccpl.getNonceStream().readAllBytes());
+                SinglePayload rccpl = new SinglePayload(readAllBytes(ccpl.getNonceStream()));
                 send((BroadcastPacket) new UnicastPacket(rccpl.getSize()).setDestinationAddress(packet.getSourceAddress())
                         .setSourceAddress(thisNode.ID).setTTL(maxTTL).setPacketType(PacketType.UnicastOnionCircuitRejected)
                         .setPacketData(rccpl).timeStamp());
@@ -569,7 +571,7 @@ public class Router {
                                     upkts.getType() == PacketType.UnicastOnionCircuitCreateEndpoint) &&
                                     toSend.getPacketData(true) instanceof CircuitCreatePayload ccp &&
                             Arrays.equals(upkts.getSourceAddress(),thisNode.ID)) {
-                                byte[] cnid = ccp.getNonceStream().readAllBytes();
+                                byte[] cnid = readAllBytes(ccp.getNonceStream());
                                 if (addNID(cnid)) {
                                     nIDtoOnionCircuitID.put(BytesToHex.bytesToHex(cnid), onionPayload.getLayer().getCircuitIDString());
                                 } else {
@@ -826,7 +828,7 @@ public class Router {
         if ((toCharge.getType() == PacketType.BroadcastSignature || toCharge.getType() == PacketType.UnicastSignature
         || toCharge.getType() == PacketType.DirectSignature)
                 && toCharge.getPacketData(true) instanceof SignaturePayload sigp) {
-            pkHash = sigp.getDataHash().readAllBytes();
+            pkHash = readAllBytes(sigp.getDataHash());
             pkHashStr = sigp.getDataHashString();
             signaturePayload = sigp;
         } else {
@@ -859,7 +861,7 @@ public class Router {
             synchronized (store) { // Set store contents
                 store.packetHash = pkHash;
                 if (signaturePayload != null) {
-                    store.signatureHash = signaturePayload.getSignatureHash().readAllBytes();
+                    store.signatureHash = readAllBytes(signaturePayload.getSignatureHash());
                     store.packetSignature = new SignaturePayload[signaturePayload.getMaxParts()];
                     if (signaturePayload.getPartID() < store.packetSignature.length)
                         store.packetSignature[signaturePayload.getPartID()] = signaturePayload;
@@ -881,7 +883,7 @@ public class Router {
                 }
                 if (signaturePayload != null) { // Update store contents
                     if (store.signatureHash == null)
-                        store.signatureHash = signaturePayload.getSignatureHash().readAllBytes();
+                        store.signatureHash = readAllBytes(signaturePayload.getSignatureHash());
                     else {
                         try {
                             if (!StreamEquals.streamEqualsArray(signaturePayload.getSignatureHash(), store.signatureHash))
@@ -908,8 +910,10 @@ public class Router {
                     if (store.packet.validateWithSignature(cryptoProvider.GetHasherInstance(), cryptoProvider.GetVerifierInstance().setPublicKey(cNode.dsaKey), sig))
                         toret = store.packet;
                     synchronized (packetChargeLock) {
-                        store.olderStore.newerStore = store.newerStore;
-                        store.newerStore.olderStore = store.olderStore;
+                        if (store.olderStore != null)
+                            store.olderStore.newerStore = store.newerStore;
+                        if (store.newerStore != null)
+                            store.newerStore.olderStore = store.olderStore;
                         store.nextFreeStore = freeStore;
                         freeStore = store;
                         packetStore.remove(pkHashStr);

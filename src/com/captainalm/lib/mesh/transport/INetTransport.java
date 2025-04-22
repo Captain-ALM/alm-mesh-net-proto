@@ -33,4 +33,11 @@ public interface INetTransport extends Closeable {
      * @return If the transport is active.
      */
     boolean isActive();
+
+    /**
+     * Signals that an encryption upgrade is ready.
+     *
+     * @param writingEncryptionKey The encryption key to upgrade the writer to.
+     */
+    void upgrade(byte[] writingEncryptionKey);
 }

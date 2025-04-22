@@ -4,6 +4,10 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Provides the ability to copy an {@link java.io.InputStream} to an {@link java.io.OutputStream}.
@@ -52,5 +56,42 @@ public final class InputStreamTransfer {
         } catch (EOFException ignored) {
         }
         return pos;
+    }
+
+    /**
+     * Reads all bytes from an {@link InputStream}, blocking if necessary.
+     *
+     * @param inputStream The input stream to read from.
+     * @return The read in bytes or an empty byte array.
+     */
+    public static byte[] readAllBytes(InputStream inputStream) {
+        if (inputStream == null)
+            return new byte[0];
+        byte[] buffer = new byte[4096];
+        List<byte[]> bytesList = new ArrayList<>();
+        List<Integer> sizeList = new ArrayList<>();
+        int bytesRead;
+        try {
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                sizeList.add(bytesRead);
+                bytesList.add(buffer);
+                buffer = new byte[4096];
+            }
+        } catch (IOException ignored) {
+        }
+        int sz = 0;
+        for (int size : sizeList)
+            sz += size;
+        buffer = new byte[sz];
+        int pos = 0;
+        int i = 0;
+        for (byte[] bytes : bytesList) {
+            int len = sizeList.get(i++);
+            System.arraycopy(bytes, 0, buffer, pos, len);
+            pos += len;
+        }
+        bytesList.clear();
+        sizeList.clear();
+        return buffer;
     }
 }

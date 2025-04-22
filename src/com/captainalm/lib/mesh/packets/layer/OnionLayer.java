@@ -48,7 +48,7 @@ public class OnionLayer {
         this.dataStartIndex = 0;
         this.dataSize = this.data.length;
         this.subLayer = encapsulatedLayer;
-        System.arraycopy(encapsulatedLayer.data, encapsulatedLayer.dataStartIndex, data, 0, encapsulatedLayer.dataSize);
+        System.arraycopy(encapsulatedLayer.data, encapsulatedLayer.dataStartIndex, data, 33, encapsulatedLayer.dataSize);
         this.subLayer.parent = this;
         this.subLayer.data = this.data;
         this.subLayer.dataStartIndex += 33;

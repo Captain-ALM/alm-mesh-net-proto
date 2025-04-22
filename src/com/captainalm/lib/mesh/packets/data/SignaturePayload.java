@@ -183,6 +183,8 @@ public class SignaturePayload extends PacketData {
      * @return The signature or an empty byte array on validation failure.
      */
     public static byte[] getSignatureFromFragments(SignaturePayload[] fragments, byte[] signatureHash, IHasher hProvider) {
+        if (fragments == null || fragments.length == 0)
+            return new byte[0];
         byte[] signature = new byte[fragments[0].getSignatureLength()];
         OutputStream out = new ByteBufferOverwriteOutputStream(signature, 0, signature.length);
         for (SignaturePayload fragment : fragments)

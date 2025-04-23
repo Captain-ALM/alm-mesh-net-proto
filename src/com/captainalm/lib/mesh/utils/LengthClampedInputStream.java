@@ -60,9 +60,9 @@ public class LengthClampedInputStream extends FilterInputStream {
         if (closed) throw new IOException("stream closed");
         if (clampedLength < 1)
             return -1;
-        int lena = Math.min(len, positiveInt(clampedLength));
+        int lena = super.read(b, off, Math.min(len, positiveInt(clampedLength)));
         clampedLength -= lena;
-        return super.read(b, off, lena);
+        return lena;
     }
 
     private int positiveInt(long value) {
@@ -73,9 +73,9 @@ public class LengthClampedInputStream extends FilterInputStream {
     @Override
     public long skip(long n) throws IOException {
         if (closed) throw new IOException("stream closed");
-        long len = Math.min(n, clampedLength);
+        long len = super.skip(Math.min(n, clampedLength));
         clampedLength -= len;
-        return super.skip(len);
+        return len;
     }
 
     protected synchronized void decrementMarkResetLength() {

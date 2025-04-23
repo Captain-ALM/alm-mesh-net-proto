@@ -70,10 +70,8 @@ public final class PacketBytesInputStream implements Closeable {
             }
         }
         int read = InputStreamTransfer.readAllBytes(in, readHeader);
-        if (read != 2) {
-            in.close();
+        if (read != 2)
             throw new EOFException();
-        }
         PacketType pt = PacketType.fromID(readHeader[1]);
         int headSize;
         if (pt.getMessagingType() == PacketMessagingType.Broadcast)
@@ -83,11 +81,13 @@ public final class PacketBytesInputStream implements Closeable {
         else
             headSize = pk.getPacketDataStartIndex();
         short sz = IntOnStream.ReadShort(in);
+        if (sz < 0)
+            throw new EOFException();
         buffer = new byte[sz + headSize + 32];
-        ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(buffer, 0, buffer.length);
+        ByteBufferOverwriteOutputStream ovrw = new ByteBufferOverwriteOutputStream(buffer, 0, buffer.length, true);
         ovrw.write(readHeader);
         IntOnStream.WriteShort(ovrw, sz);
-        InputStreamTransfer.streamTransfer(new LengthClampedInputStream(in, headSize - 4 + sz + 32), ovrw);
+        InputStreamTransfer.streamTransfer(new LengthClampedInputStream(in, buffer.length - 4), ovrw);
         return buffer;
     }
 

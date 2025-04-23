@@ -160,6 +160,8 @@ public class Router {
             networkAddresses.put(node.getIPv4AddressString(), node);
             networkAddresses.put(node.getIPv6AddressString(), node);
             updates.add(new NodeUpdate(node, false));
+            existing.combineSibling(thisNode);
+            thisNode.combineSibling(existing);
             resetNextHops();
         } else
             existing.combine(node);

@@ -178,7 +178,6 @@ public final class HandshakeProcessor {
                                         sig.length > 0 && cProvider.GetVerifierInstance().setPublicKey(remote.dsaKey).verify(finalPacket.getHash(), sig)) {
                                     if (finalPacket.getType() == PacketType.DirectHandshakeAccept && finalPacket.getPacketData(true) instanceof SinglePayload sp) {
                                         encKey = cProvider.GetUnwrapperInstance().setPrivateKey(kemPrivateKey).unwrap(sp.getPayload());
-                                        transport.upgrade(encKey);
                                     } else {
                                         failed = true;
                                     }
@@ -342,7 +341,8 @@ public final class HandshakeProcessor {
             if (encKey == null) {
                 failed = true;
                 return null;
-            }
+            } else
+                transport.upgrade(encKey);
         }
         return encKey;
     }

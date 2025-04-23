@@ -49,7 +49,7 @@ public final class InputStreamTransfer {
         try {
             while (pos < bytes.length) {
                 int bytesRead = inputStream.read(bytes, pos, bytes.length - pos);
-                if (bytesRead < 1)
+                if (bytesRead == - 1)
                     return pos;
                 pos += bytesRead;
             }

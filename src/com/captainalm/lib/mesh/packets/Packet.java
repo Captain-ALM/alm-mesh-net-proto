@@ -257,7 +257,7 @@ public class Packet {
     public int getPacketSize() {
         if (data == null || data.length < 36)
             return 0;
-        return 4 + getPayloadSize() + 32;
+        return getPacketDataStartIndex() + getPayloadSize() + 32;
     }
 
     /**

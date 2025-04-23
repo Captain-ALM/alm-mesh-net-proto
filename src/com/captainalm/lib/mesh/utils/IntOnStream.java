@@ -91,8 +91,8 @@ public final class IntOnStream {
     public static short ReadShort(InputStream in) throws IOException {
         if (in == null)
             throw new IllegalArgumentException("in is null");
-        short value = (short) (ReadStream(in) * 256);
-        return (short) (value + (short) ReadStream(in));
+        int value = ReadStream(in) * 256;
+        return (short) (value + ReadStream(in));
     }
 
     /**
